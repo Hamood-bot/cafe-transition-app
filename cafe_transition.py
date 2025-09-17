@@ -15,9 +15,11 @@ ASSETS_DIR = os.path.join(os.path.dirname(__file__), 'assets')
 OUTSIDE_GIF = os.path.join(ASSETS_DIR, 'outside.gif')
 INSIDE_GIF  = os.path.join(ASSETS_DIR, 'original.gif')
 FOCUSED_GIF = os.path.join(ASSETS_DIR, 'focused.gif')  # scene shown after selecting Focused mood
+FIREPLACE_GIF = os.path.join(ASSETS_DIR, 'fireplace.gif')  # cozy fireplace scene
 BELL_SOUND  = os.path.join(ASSETS_DIR, 'bell.wav')
 LEAF_IMAGE  = os.path.join(ASSETS_DIR, 'leaf.png')  # user-supplied leaf sprite (prefer small like 16x16 or 24x24)
 RAIN_SOUND  = os.path.join(ASSETS_DIR, 'rain.wav')  # soft looping ambience (optional)
+FIREPLACE_SOUND = os.path.join(ASSETS_DIR, 'fire.mp3')  # cozy fireplace crackling (optional)
 HOVER_SOUND = os.path.join(ASSETS_DIR, 'hover.mp3') # menu hover blip (optional)
 TYPING_SOUND = os.path.join(ASSETS_DIR, 'typing.mp3')  # short subtle key tap (optional)
 PAGEFLIP_SOUND = os.path.join(ASSETS_DIR, 'pageflip.mp3')  # page flip sound for notebook
@@ -60,7 +62,7 @@ SHOW_COORDS = True             # If True, displays logical cursor coordinates to
 CURSOR_MODE = 'leaf'           # 'leaf' or 'crosshair' for precision aiming
 USE_LEAF_CURSOR = True         # Enable custom leaf cursor instead of system pointer
 LEAF_SCALE = 1                 # Optional extra scale on the leaf image (logical before canvas scale)
-LEAF_OFFSET = (0, 0)           # Pixel offset (logical) to adjust anchor (e.g., (-8,-8) to center)
+LEAF_OFFSET = (-12, -12)       # Pixel offset (logical) to adjust anchor (e.g., (-8,-8) to center)
 LEAF_LOCK_TO_SCREEN = True     # If True, leaf cursor will NOT be multiplied by scene scale (stays system-cursor sized)
 LEAF_TARGET_SCREEN_SIZE = None # e.g., (24,24) to force size in screen pixels when locked; None to keep source size
 LEAF_AUTO_SHRINK = True        # If True and no explicit target size, very large leaf images are downscaled automatically
@@ -95,7 +97,15 @@ MOOD_MENU_ITEMS = [
 # Cozy submenu configuration
 COZY_SUBMENU_ITEMS = [
     ("Meditate", "find inner peace"),
-    ("Phone", "play & relax")
+    ("Phone", "play & relax"),
+    ("Fireplace", "cozy crackling sounds")
+]
+
+# Focused submenu configuration
+FOCUSED_SUBMENU_ITEMS = [
+    ("Notebook", "write & journal"),
+    ("Calendar", "view & plan dates"),
+    ("To-Do List", "organize your tasks")
 ]
 
 # Creative submenu configuration  
@@ -201,6 +211,14 @@ BLOCKY_FONT_SPACING = 1  # extra spacing between characters
 # Notebook persistence
 NOTEBOOK_SAVE_FILE = os.path.join(ASSETS_DIR, 'notebook_data.json')
 
+# iPod configuration
+IPOD_WIDTH = 200
+IPOD_HEIGHT = 280
+IPOD_BG_COLOR = "#f0f0f0"
+IPOD_SCREEN_COLOR = "#000000"
+IPOD_TEXT_COLOR = "#ffffff"
+IPOD_ACCENT_COLOR = "#0080ff"
+
 # ------------------------------------------------
 
 class AnimatedGif:
@@ -248,8 +266,11 @@ class SceneManager:
     STATE_FADING  = 'fading'
     STATE_INSIDE  = 'inside'
     STATE_FADING_TO_FOCUSED = 'fading_to_focused'
+    STATE_FADING_TO_FIREPLACE = 'fading_to_fireplace'
+    STATE_FADING_FROM_FIREPLACE = 'fading_from_fireplace'
     STATE_FOCUSED = 'focused'
     STATE_TEARING = 'tearing'
+    STATE_FIREPLACE = 'fireplace'
 
     def __init__(self, app):
         self.app = app
@@ -267,6 +288,14 @@ class SceneManager:
             self.fade_counter += 1
             if self.fade_counter >= CROSSFADE_FRAMES:
                 self.state = self.STATE_FOCUSED
+        elif self.state == self.STATE_FADING_TO_FIREPLACE:
+            self.fade_counter += 1
+            if self.fade_counter >= CROSSFADE_FRAMES:
+                self.state = self.STATE_FIREPLACE
+        elif self.state == self.STATE_FADING_FROM_FIREPLACE:
+            self.fade_counter += 1
+            if self.fade_counter >= CROSSFADE_FRAMES:
+                self.state = self.STATE_INSIDE
         elif self.state == self.STATE_TEARING:
             self.fade_counter += 1
             if self.fade_counter >= TEAR_DURATION_FRAMES:
@@ -293,6 +322,24 @@ class SceneManager:
             self.state = self.STATE_FADING_TO_FOCUSED
             self.fade_counter = 0
             self.app.play_bell()
+
+    def trigger_fade_to_fireplace(self):
+        # Allow triggering from INSIDE only (ignore if already fading or in fireplace)
+        if self.state not in (self.STATE_INSIDE,):
+            print(f"[DEBUG] trigger_fade_to_fireplace ignored; state={self.state}")
+            return
+        print('[DEBUG] trigger_fade_to_fireplace start')
+        self.state = self.STATE_FADING_TO_FIREPLACE
+        self.fade_counter = 0
+    
+    def trigger_fade_from_fireplace(self):
+        # Allow triggering from FIREPLACE only
+        if self.state not in (self.STATE_FIREPLACE,):
+            print(f"[DEBUG] trigger_fade_from_fireplace ignored; state={self.state}")
+            return
+        print('[DEBUG] trigger_fade_from_fireplace start')
+        self.state = self.STATE_FADING_FROM_FIREPLACE
+        self.fade_counter = 0
 
 class PingPongGame:
     def __init__(self, width=120, height=200, ball_speed=2, paddle_speed=3):
@@ -436,6 +483,7 @@ class CafeApp:
         self.outside = AnimatedGif(OUTSIDE_GIF)
         self.inside  = AnimatedGif(INSIDE_GIF)
         self.focused_scene = AnimatedGif(FOCUSED_GIF)
+        self.fireplace = AnimatedGif(FIREPLACE_GIF)
         # Fallback: if specified INSIDE_GIF path didn't load but a generic 'inside.gif' exists, use it
         alt_inside_path = os.path.join(ASSETS_DIR, 'inside.gif')
         if not self.inside.valid and os.path.isfile(alt_inside_path):
@@ -468,8 +516,11 @@ class CafeApp:
 
         # Pygame mixer for bell
         self.rain_channel = None
+        self.fireplace_channel = None
         self.bell_loaded = False
         self.rain_loaded = False
+        self.fireplace_loaded = False
+        self.fireplace_playing = False
         self.music_channel = None
         self.music_loaded = False
         self.current_music_path = None
@@ -491,6 +542,15 @@ class CafeApp:
                     self.rain_loaded = True
                 except Exception as re:
                     print("[WARN] Could not play rain ambience:", re)
+            
+            # Load fireplace sound but don't play it yet
+            if os.path.isfile(FIREPLACE_SOUND):
+                try:
+                    self.fireplace_sound = pygame.mixer.Sound(FIREPLACE_SOUND)
+                    self.fireplace_sound.set_volume(0.95)  # Moderate volume for fireplace
+                    self.fireplace_loaded = True
+                except Exception as fe:
+                    print("[WARN] Could not load fireplace sound:", fe)
         except Exception as e:
             print("[WARN] Pygame mixer init failed:", e)
 
@@ -514,6 +574,12 @@ class CafeApp:
         self.cozy_submenu_hover_index = -1
         self.cozy_submenu_selected = ""
         
+        # Focused submenu state
+        self.focused_submenu_active = False
+        self.focused_submenu_boxes = []
+        self.focused_submenu_hover_index = -1
+        self.focused_submenu_selected = ""
+        
         # Creative submenu state
         self.creative_submenu_active = False
         self.creative_submenu_boxes = []
@@ -531,6 +597,11 @@ class CafeApp:
         # Meditation state
         self.meditation_active = False
         self.meditation_timer = None
+        
+        # To-do list state
+        self.todo_list_active = False
+        self.todo_items = []
+        self.todo_selected_index = 0
         
         self.hover_sound_loaded = False
         self.typing_sound_loaded = False
@@ -598,7 +669,9 @@ class CafeApp:
         self.root.bind('<Down>', self.on_key)
         self.root.bind('<Return>', self.on_key)
         self.root.bind('<Escape>', self.on_key)
-        # Remove specific w/s bindings to avoid conflicts with KeyPress/KeyRelease
+        # Add W/S bindings for to-do list navigation
+        self.root.bind('<w>', self.on_key)
+        self.root.bind('<s>', self.on_key)
         
         # Key press/release tracking for smooth movement
         self.root.bind('<KeyPress>', self.on_key_press)
@@ -622,6 +695,8 @@ class CafeApp:
                         self.start_phone_game()
                     elif label == "Meditate":
                         self.start_meditation()
+                    elif label == "Fireplace":
+                        self.toggle_fireplace()
                     return
                     
         # If creative submenu active, handle submenu clicks
@@ -642,6 +717,56 @@ class CafeApp:
                         self.menu_active = True
                     return
                     
+        # If focused submenu active, handle submenu clicks  
+        if self.focused_submenu_active:
+            lx = event.x // self.scale
+            ly = event.y // self.scale
+            for idx, (x1,y1,x2,y2) in self.focused_submenu_boxes:
+                if x1 <= lx <= x2 and y1 <= ly <= y2:
+                    label, _ = FOCUSED_SUBMENU_ITEMS[idx]
+                    self.focused_submenu_selected = label
+                    self.focused_submenu_active = False
+                    
+                    if label == "Notebook":
+                        self.scene.trigger_fade_to_focused()  # Go to focused scene for notebook
+                    elif label == "Calendar":
+                        self.scene.trigger_fade_to_focused()  # Go to focused scene for calendar
+                    elif label == "To-Do List":
+                        self.start_todo_list()  # New to-do list function
+                    return
+        
+        # If todo list active, handle button clicks
+        if self.todo_list_active and hasattr(self, 'todo_button_boxes'):
+            lx = event.x // self.scale
+            ly = event.y // self.scale
+            for idx, (x1,y1,x2,y2) in enumerate(self.todo_button_boxes):
+                if x1 <= lx <= x2 and y1 <= ly <= y2:
+                    button_names = ["Add New", "Edit", "Delete", "Toggle"]
+                    button_name = button_names[idx]
+                    
+                    if button_name == "Add New":
+                        if not self.todo_editing:
+                            self.todo_input_mode = True
+                            self.todo_input_text = ""
+                    elif button_name == "Edit":
+                        if not self.todo_input_mode and self.todo_items and self.todo_selected_index < len(self.todo_items):
+                            self.todo_editing = True
+                            self.todo_edit_text = self.todo_items[self.todo_selected_index]['text']
+                    elif button_name == "Delete":
+                        if not self.todo_editing and not self.todo_input_mode and self.todo_items and self.todo_selected_index < len(self.todo_items):
+                            del self.todo_items[self.todo_selected_index]
+                            if self.todo_selected_index >= len(self.todo_items) and self.todo_items:
+                                self.todo_selected_index = len(self.todo_items) - 1
+                            elif not self.todo_items:
+                                self.todo_selected_index = 0
+                            self.save_todo_items()
+                    elif button_name == "Toggle":
+                        if not self.todo_editing and not self.todo_input_mode and self.todo_items and self.todo_selected_index < len(self.todo_items):
+                            current = self.todo_items[self.todo_selected_index]
+                            current['completed'] = not current.get('completed', False)
+                            self.save_todo_items()
+                    return
+                    
         # If menu active, interpret click as selection attempt
         if self.menu_active:
             lx = event.x // self.scale
@@ -660,8 +785,8 @@ class CafeApp:
                         print('[DEBUG] Creative selected - showing submenu')
                         self.activate_creative_submenu()
                     elif label == 'Focused':
-                        print('[DEBUG] Mouse click selecting Focused – initiating focused transition')
-                        self.scene.trigger_fade_to_focused()
+                        print('[DEBUG] Focused selected - showing submenu')
+                        self.activate_focused_submenu()
                     return
               
         # Focused scene interactive clicks
@@ -747,12 +872,15 @@ class CafeApp:
         frame_out = None
         frame_in = None
         frame_focus = None
+        frame_fireplace = None
         if self.scene.state in (SceneManager.STATE_OUTSIDE, SceneManager.STATE_FADING):
             frame_out = self.outside.get_frame(self.elapsed_outside_ms) if self.outside.valid else self.placeholder_frame("OUTSIDE")
-        if self.scene.state in (SceneManager.STATE_INSIDE, SceneManager.STATE_FADING, SceneManager.STATE_FADING_TO_FOCUSED):
+        if self.scene.state in (SceneManager.STATE_INSIDE, SceneManager.STATE_FADING, SceneManager.STATE_FADING_TO_FOCUSED, SceneManager.STATE_FADING_TO_FIREPLACE, SceneManager.STATE_FADING_FROM_FIREPLACE):
             frame_in = self.inside.get_frame(self.elapsed_inside_ms) if self.inside.valid else None
         if self.scene.state in (SceneManager.STATE_FOCUSED, SceneManager.STATE_FADING_TO_FOCUSED):
             frame_focus = self.focused_scene.get_frame(self.elapsed_focused_ms) if self.focused_scene.valid else None
+        if self.scene.state in (SceneManager.STATE_FIREPLACE, SceneManager.STATE_FADING_TO_FIREPLACE, SceneManager.STATE_FADING_FROM_FIREPLACE):
+            frame_fireplace = self.fireplace.get_frame(self.elapsed_inside_ms) if self.fireplace.valid else None
 
         if frame_out is not None:
             frame_out = self._standardize_frame(frame_out)
@@ -760,6 +888,8 @@ class CafeApp:
             frame_in = self._standardize_frame(frame_in)
         if frame_focus is not None:
             frame_focus = self._standardize_frame(frame_focus)
+        if frame_fireplace is not None:
+            frame_fireplace = self._standardize_frame(frame_fireplace)
 
         # Blend logic across transitions
         if self.scene.state == SceneManager.STATE_FADING and frame_out and frame_in:
@@ -775,6 +905,24 @@ class CafeApp:
             alpha = self.scene.fade_counter / max(1, CROSSFADE_FRAMES)
             blended = Image.blend(frame_in, frame_focus, alpha)
             disp = self._to_photo(blended)
+        elif self.scene.state == SceneManager.STATE_FADING_TO_FIREPLACE:
+            # Provide fallback placeholder fireplace frame if missing
+            if frame_in is None:
+                frame_in = self.placeholder_frame('INSIDE')
+            if frame_fireplace is None:
+                frame_fireplace = self.placeholder_frame('FIREPLACE')
+            alpha = self.scene.fade_counter / max(1, CROSSFADE_FRAMES)
+            blended = Image.blend(frame_in, frame_fireplace, alpha)
+            disp = self._to_photo(blended)
+        elif self.scene.state == SceneManager.STATE_FADING_FROM_FIREPLACE:
+            # Fade from fireplace back to inside
+            if frame_fireplace is None:
+                frame_fireplace = self.placeholder_frame('FIREPLACE')
+            if frame_in is None:
+                frame_in = self.placeholder_frame('INSIDE')
+            alpha = self.scene.fade_counter / max(1, CROSSFADE_FRAMES)
+            blended = Image.blend(frame_fireplace, frame_in, alpha)
+            disp = self._to_photo(blended)
         elif self.scene.state == SceneManager.STATE_TEARING:
             # Render tearing effect (with placeholder if needed)
             if frame_in is None:
@@ -786,7 +934,9 @@ class CafeApp:
             disp = self._to_photo(tear_img)
         else:
             # choose highest priority frame by current state
-            if self.scene.state == SceneManager.STATE_FOCUSED and frame_focus is not None:
+            if self.scene.state == SceneManager.STATE_FIREPLACE and frame_fireplace is not None:
+                base = frame_fireplace
+            elif self.scene.state == SceneManager.STATE_FOCUSED and frame_focus is not None:
                 base = frame_focus
             elif self.scene.state in (SceneManager.STATE_INSIDE, SceneManager.STATE_FADING_TO_FOCUSED) and frame_in is not None:
                 base = frame_in
@@ -827,6 +977,8 @@ class CafeApp:
                 self.draw_cozy_music_button()
         elif self.cozy_submenu_active:
             self.draw_cozy_submenu()
+        elif self.focused_submenu_active:
+            self.draw_focused_submenu()
         elif self.creative_submenu_active:
             self.draw_creative_submenu()
         elif self.menu_selected_index != -1:
@@ -840,6 +992,10 @@ class CafeApp:
         # Draw meditation overlay
         if self.meditation_active:
             self.draw_meditation()
+            
+        # Draw to-do list in focused scene
+        if self.todo_list_active:
+            self.draw_todo_list_overlay()
 
         # Hover highlight for focused interactive zones
         if self.scene.state == SceneManager.STATE_FOCUSED:
@@ -1154,6 +1310,42 @@ class CafeApp:
                         pass
             return
             
+        # Hover detection for focused submenu
+        if self.focused_submenu_active:
+            lx = event.x // self.scale
+            ly = event.y // self.scale
+            new_hover = -1
+            for idx, (x1,y1,x2,y2) in self.focused_submenu_boxes:
+                if x1 <= lx <= x2 and y1 <= ly <= y2:
+                    new_hover = idx
+                    break
+            if new_hover != self.focused_submenu_hover_index:
+                self.focused_submenu_hover_index = new_hover
+                if new_hover != -1 and self.hover_sound_loaded:
+                    try:
+                        self.hover_sound.play()
+                    except Exception:
+                        pass
+            return
+        
+        # Hover detection for todo list buttons
+        if self.todo_list_active and hasattr(self, 'todo_button_boxes'):
+            lx = event.x // self.scale
+            ly = event.y // self.scale
+            new_hover = -1
+            for idx, (x1,y1,x2,y2) in enumerate(self.todo_button_boxes):
+                if x1 <= lx <= x2 and y1 <= ly <= y2:
+                    new_hover = idx
+                    break
+            if new_hover != self.todo_button_hover:
+                self.todo_button_hover = new_hover
+                if new_hover != -1 and self.hover_sound_loaded:
+                    try:
+                        self.hover_sound.play()
+                    except Exception:
+                        pass
+            return
+            
         # Hover detection for menu (use logical coordinates)
         if self.menu_active:
             lx = event.x // self.scale
@@ -1186,11 +1378,22 @@ class CafeApp:
         self.root.destroy()
 
     def on_key(self, event):
-        # ESC during focus transition or focused state - return to inside view and show menu
-        if self.scene.state in (SceneManager.STATE_FADING_TO_FOCUSED, SceneManager.STATE_FOCUSED, SceneManager.STATE_TEARING):
+        # ESC during focus transition, focused state, fireplace transition, or fireplace - return to inside view and show menu
+        if self.scene.state in (SceneManager.STATE_FADING_TO_FOCUSED, SceneManager.STATE_FOCUSED, SceneManager.STATE_TEARING, SceneManager.STATE_FADING_TO_FIREPLACE, SceneManager.STATE_FIREPLACE, SceneManager.STATE_FADING_FROM_FIREPLACE):
             if event.keysym == 'Escape':
-                self.scene.state = SceneManager.STATE_INSIDE
-                # Reactivate the menu when returning from focus mode
+                # Handle fireplace exit with transition
+                if self.scene.state in (SceneManager.STATE_FADING_TO_FIREPLACE, SceneManager.STATE_FIREPLACE):
+                    if self.fireplace_playing:
+                        if self.fireplace_channel:
+                            self.fireplace_channel.stop()
+                            self.fireplace_channel = None
+                        self.fireplace_playing = False
+                    # Use smooth transition back to inside scene
+                    self.scene.trigger_fade_from_fireplace()
+                else:
+                    # For other states, immediate transition to inside
+                    self.scene.state = SceneManager.STATE_INSIDE
+                # Reactivate the menu when returning from focus mode or fireplace
                 self.activate_mood_menu()
                 return
         
@@ -1209,6 +1412,69 @@ class CafeApp:
                 self.ping_pong_game = None
                 self.cozy_submenu_active = True  # Return to cozy submenu
                 return
+                
+        # To-do list controls
+        if self.todo_list_active:
+            if event.keysym == 'Escape':
+                if self.todo_editing:
+                    # Cancel editing
+                    self.todo_editing = False
+                    self.todo_edit_text = ""
+                elif self.todo_input_mode:
+                    # Cancel input mode
+                    self.todo_input_mode = False
+                    self.todo_input_text = ""
+                else:
+                    # Exit to-do list
+                    self.save_todo_items()
+                    self.todo_list_active = False
+                    self.focused_submenu_active = True
+                return
+            elif event.keysym.lower() in ('w', 's'):
+                if not self.todo_editing and not self.todo_input_mode and self.todo_items:
+                    delta = -1 if event.keysym.lower() == 'w' else 1
+                    self.todo_selected_index = (self.todo_selected_index + delta) % len(self.todo_items)
+            elif event.keysym == 'space':
+                if not self.todo_editing and not self.todo_input_mode and self.todo_items and self.todo_selected_index < len(self.todo_items):
+                    # Toggle completion status
+                    current = self.todo_items[self.todo_selected_index]
+                    current['completed'] = not current.get('completed', False)
+                    self.save_todo_items()
+            elif event.keysym == 'Return':
+                if self.todo_editing:
+                    # Save edit
+                    if self.todo_edit_text.strip() and self.todo_selected_index < len(self.todo_items):
+                        self.todo_items[self.todo_selected_index]['text'] = self.todo_edit_text.strip()
+                        self.save_todo_items()
+                    self.todo_editing = False
+                    self.todo_edit_text = ""
+                elif self.todo_input_mode:
+                    # Save new task
+                    if self.todo_input_text.strip():
+                        self.todo_items.append({"text": self.todo_input_text.strip(), "completed": False})
+                        self.todo_selected_index = len(self.todo_items) - 1
+                        self.save_todo_items()
+                    self.todo_input_mode = False
+                    self.todo_input_text = ""
+                else:
+                    # Start input mode for new task
+                    self.todo_input_mode = True
+                    self.todo_input_text = ""
+            elif event.keysym == 'Delete':
+                if not self.todo_editing and self.todo_items and self.todo_selected_index < len(self.todo_items):
+                    # Remove selected item
+                    del self.todo_items[self.todo_selected_index]
+                    if self.todo_selected_index >= len(self.todo_items) and self.todo_items:
+                        self.todo_selected_index = len(self.todo_items) - 1
+                    elif not self.todo_items:
+                        self.todo_selected_index = 0
+                    self.save_todo_items()
+            elif event.keysym == 'e':
+                if not self.todo_editing and self.todo_items and self.todo_selected_index < len(self.todo_items):
+                    # Start editing selected item
+                    self.todo_editing = True
+                    self.todo_edit_text = self.todo_items[self.todo_selected_index]['text']
+            return
                 
         # Cozy submenu navigation
         if self.cozy_submenu_active:
@@ -1233,11 +1499,19 @@ class CafeApp:
                         self.start_phone_game()
                     elif label == "Meditate":
                         self.start_meditation()
+                    elif label == "Fireplace":
+                        self.toggle_fireplace()
                     elif label == "iPod":
                         self.start_ipod()
             elif event.keysym == 'Escape':
                 self.cozy_submenu_active = False
                 self.menu_active = True  # Go back to main menu
+                # Stop fireplace sound when exiting cozy submenu
+                if self.fireplace_playing:
+                    if self.fireplace_channel:
+                        self.fireplace_channel.stop()
+                        self.fireplace_channel = None
+                    self.fireplace_playing = False
             return
             
         # Creative submenu navigation
@@ -1269,7 +1543,37 @@ class CafeApp:
                 self.creative_submenu_active = False
                 self.menu_active = True  # Go back to main menu
             return
-                
+            
+        # Focused submenu navigation
+        if self.focused_submenu_active:
+            if event.keysym in ('Up','Down'):
+                if self.focused_submenu_hover_index == -1:
+                    self.focused_submenu_hover_index = 0
+                else:
+                    delta = -1 if event.keysym == 'Up' else 1
+                    total = len(FOCUSED_SUBMENU_ITEMS)
+                    self.focused_submenu_hover_index = (self.focused_submenu_hover_index + delta) % total
+                if self.hover_sound_loaded:
+                    try:
+                        self.hover_sound.play()
+                    except Exception:
+                        pass
+            elif event.keysym == 'Return':
+                if self.focused_submenu_hover_index != -1:
+                    label, _ = FOCUSED_SUBMENU_ITEMS[self.focused_submenu_hover_index]
+                    self.focused_submenu_selected = label
+                    self.focused_submenu_active = False
+                    if label == "Notebook":
+                        self.scene.trigger_fade_to_focused()  # Go to focused scene for notebook
+                    elif label == "Calendar":
+                        self.scene.trigger_fade_to_focused()  # Go to focused scene for calendar
+                    elif label == "To-Do List":
+                        self.start_todo_list()  # New to-do list function
+            elif event.keysym == 'Escape':
+                self.focused_submenu_active = False
+                self.menu_active = True  # Go back to main menu
+            return
+            
         # Main menu navigation
         if not self.menu_active:
             return
@@ -1300,14 +1604,28 @@ class CafeApp:
                         print('[DEBUG] Creative selected - showing submenu')
                         self.activate_creative_submenu()
                     elif label == 'Focused':
-                        print('[DEBUG] Enter pressed: triggering fade to focused')
-                        self.scene.trigger_fade_to_focused()
+                        print('[DEBUG] Focused selected - showing submenu')
+                        self.activate_focused_submenu()
                 except Exception:
                     pass
 
     def on_key_press(self, event):
         """Handle key press events for continuous movement tracking"""
         self.keys_pressed.add(event.keysym)
+        
+        # Handle text input for todo editing and input modes
+        if self.todo_list_active and (self.todo_editing or self.todo_input_mode):
+            if event.keysym == 'BackSpace':
+                if self.todo_editing and self.todo_edit_text:
+                    self.todo_edit_text = self.todo_edit_text[:-1]
+                elif self.todo_input_mode and self.todo_input_text:
+                    self.todo_input_text = self.todo_input_text[:-1]
+            elif len(event.char) == 1 and event.char.isprintable():
+                # Add character to appropriate text
+                if self.todo_editing:
+                    self.todo_edit_text += event.char
+                elif self.todo_input_mode:
+                    self.todo_input_text += event.char
     
     def on_key_release(self, event):
         """Handle key release events for continuous movement tracking"""
@@ -2104,6 +2422,69 @@ class CafeApp:
             # Fallback - show file path
             messagebox.showinfo("Code Editor", f"Source code file:\n{os.path.abspath(__file__)}")
     
+    # -------- Focused Submenu Methods --------
+    def activate_focused_submenu(self):
+        self.focused_submenu_active = True
+        self.focused_submenu_hover_index = -1
+        self.build_focused_submenu_layout()
+        
+    def build_focused_submenu_layout(self):
+        self.focused_submenu_boxes.clear()
+        panel_w = MOOD_MENU_WIDTH
+        total_items = len(FOCUSED_SUBMENU_ITEMS)
+        panel_h = (MOOD_MENU_TITLE_HEIGHT + MOOD_MENU_PADDING +
+                   total_items * MOOD_MENU_ITEM_HEIGHT + MOOD_MENU_PADDING)
+        # center panel
+        x1 = (self.width - panel_w)//2
+        y1 = (self.height - panel_h)//2
+        # store panel rect for drawing
+        self.focused_submenu_panel_rect = (x1, y1, x1+panel_w, y1+panel_h)
+        # item boxes
+        cur_y = y1 + MOOD_MENU_TITLE_HEIGHT
+        for i, _ in enumerate(FOCUSED_SUBMENU_ITEMS):
+            item_y1 = cur_y + i * MOOD_MENU_ITEM_HEIGHT
+            item_y2 = item_y1 + MOOD_MENU_ITEM_HEIGHT
+            left_text_x = x1 + MOOD_MENU_PADDING
+            self.focused_submenu_boxes.append((i, (left_text_x, item_y1, x1+panel_w-MOOD_MENU_PADDING, item_y2)))
+            
+    def draw_focused_submenu(self):
+        px = self.scale
+        (x1,y1,x2,y2) = self.focused_submenu_panel_rect
+        
+        # Draw panel background
+        self.canvas.create_rectangle(x1*px, y1*px, x2*px, y2*px, 
+                                     fill=MOOD_MENU_BG, outline=MOOD_MENU_BORDER, width=2)
+        
+        # Title
+        title_text = "Focused Options"
+        if USE_BLOCKY_FONT:
+            title_width = self._get_blocky_text_width(title_text)
+            title_x = x1 + (MOOD_MENU_WIDTH - title_width) // 2
+            self._draw_blocky_text(title_x, y1 + MOOD_MENU_PADDING, title_text, MOOD_MENU_TEXT_COLOR)
+        else:
+            self.canvas.create_text((x1+MOOD_MENU_WIDTH/2)*px, (y1+MOOD_MENU_PADDING+4)*px, 
+                                    text=title_text, fill=MOOD_MENU_TEXT_COLOR, font=MOOD_MENU_FONT, anchor="n")
+        
+        # Items
+        for idx, (ix1,iy1,ix2,iy2) in self.focused_submenu_boxes:
+            if idx < len(FOCUSED_SUBMENU_ITEMS):
+                label, desc = FOCUSED_SUBMENU_ITEMS[idx]
+                hovered = (idx == self.focused_submenu_hover_index)
+                if hovered:
+                    self.canvas.create_rectangle(ix1*px, iy1*px, ix2*px, iy2*px, fill=MOOD_MENU_HOVER_BG, outline="")
+                    # Draw left accent bar
+                    self.canvas.create_rectangle((ix1-4)*px, iy1*px, (ix1-2)*px, iy2*px, fill=MOOD_MENU_ACCENT, outline="")
+                text_color = MOOD_MENU_HOVER_TEXT if hovered else MOOD_MENU_TEXT_COLOR
+                
+                text_x = ix1
+                base_y = iy1 + 6
+                if USE_BLOCKY_FONT:
+                    self._draw_blocky_text(text_x, base_y, label, text_color)
+                    self._draw_blocky_text(text_x, base_y + MOOD_MENU_DESC_OFFSET, desc, text_color)
+                else:
+                    self.canvas.create_text(text_x*px, base_y*px, text=label, fill=text_color, font=MOOD_MENU_FONT, anchor='nw')
+                    self.canvas.create_text(text_x*px, (base_y + MOOD_MENU_DESC_OFFSET)*px, text=desc, fill=text_color, font=MOOD_MENU_DESC_FONT, anchor='nw')
+    
     # -------- Phone Game Methods --------
     def start_phone_game(self):
         if not self.phone_image:
@@ -2302,6 +2683,268 @@ class CafeApp:
         self.canvas.create_text((panel_x + panel_w//2)*px, exit_y*px,
                                 text=exit_text, fill=MEDITATION_TEXT_COLOR,
                                 font=("Courier New", 10), anchor="n")
+
+    # -------- To-Do List Methods --------
+    def start_todo_list(self):
+        """Start the simple to-do list overlay."""
+        self.todo_list_active = True
+        self.todo_selected_index = 0
+        self.todo_editing = False
+        self.todo_edit_text = ""
+        
+        # Button interaction state
+        self.todo_button_hover = -1  # Which button is being hovered (-1 = none)
+        self.todo_button_boxes = []  # Store button rectangles for hit detection
+        
+        # Input mode for adding new tasks
+        self.todo_input_mode = False
+        self.todo_input_text = ""
+        
+        # Load existing to-do items from file if available
+        self.load_todo_items()
+        
+    def load_todo_items(self):
+        """Load to-do items from persistent storage."""
+        todo_save_file = os.path.join(ASSETS_DIR, 'todo_data.json')
+        try:
+            if os.path.exists(todo_save_file):
+                with open(todo_save_file, 'r') as f:
+                    data = json.load(f)
+                    self.todo_items = data.get('items', [])
+            else:
+                # Default items for first run
+                self.todo_items = [
+                    {"text": "My first task", "completed": False},
+                    {"text": "Another task", "completed": False},
+                    {"text": "Completed task", "completed": True}
+                ]
+        except Exception as e:
+            print(f"[WARN] Could not load to-do items: {e}")
+            self.todo_items = [{"text": "Failed to load saved items", "completed": False, "details": ""}]
+    
+    def save_todo_items(self):
+        """Save to-do items to persistent storage."""
+        todo_save_file = os.path.join(ASSETS_DIR, 'todo_data.json')
+        try:
+            data = {'items': self.todo_items}
+            with open(todo_save_file, 'w') as f:
+                json.dump(data, f, indent=2)
+        except Exception as e:
+            print(f"[WARN] Could not save to-do items: {e}")
+    
+    def add_todo_item(self, text):
+        """Add a new to-do item."""
+        if text.strip():
+            new_item = {"text": text.strip(), "completed": False, "details": ""}
+            self.todo_items.append(new_item)
+            self.todo_selected_index = len(self.todo_items) - 1
+            self.save_todo_items()
+    
+    def delete_todo_item(self, index):
+        """Delete a to-do item by index."""
+        if 0 <= index < len(self.todo_items):
+            self.todo_items.pop(index)
+            if self.todo_selected_index >= len(self.todo_items):
+                self.todo_selected_index = max(0, len(self.todo_items) - 1)
+            self.save_todo_items()
+    
+    def edit_todo_item(self, index, new_text):
+        """Edit a to-do item's text."""
+        if 0 <= index < len(self.todo_items) and new_text.strip():
+            self.todo_items[index]["text"] = new_text.strip()
+            self.save_todo_items()
+    
+    def edit_todo_details(self, index, new_details):
+        """Edit a to-do item's details."""
+        if 0 <= index < len(self.todo_items):
+            self.todo_items[index]["details"] = new_details.strip()
+            self.save_todo_items()
+    
+    def toggle_todo_completion(self, index):
+        """Toggle a to-do item's completion status."""
+        if 0 <= index < len(self.todo_items):
+            self.todo_items[index]["completed"] = not self.todo_items[index]["completed"]
+            self.save_todo_items()
+    
+    def draw_todo_list_overlay(self):
+        """Draw simple menu-style to-do list overlay."""
+        if not hasattr(self, 'todo_list_active') or not self.todo_list_active:
+            return
+            
+        px = self.scale
+        
+        # Dark overlay background
+        overlay_alpha = 200
+        overlay = Image.new('RGBA', (self.width, self.height), (11, 11, 15, overlay_alpha))
+        overlay_photo = self._to_photo(overlay)
+        self.canvas.create_image(0, 0, anchor="nw", image=overlay_photo)
+        self._frame_refs.append(overlay_photo)
+        
+        # Main panel - same style as other menus
+        panel_w = 350
+        panel_h = 450
+        panel_x = (self.width - panel_w) // 2
+        panel_y = (self.height - panel_h) // 2
+        
+        # Panel background - same as mood menu
+        self.canvas.create_rectangle(panel_x*px, panel_y*px, 
+                                     (panel_x + panel_w)*px, (panel_y + panel_h)*px,
+                                     fill=MOOD_MENU_BG, outline=MOOD_MENU_BORDER, width=2)
+        
+        # Title
+        title_text = "To-Do List"
+        if USE_BLOCKY_FONT:
+            title_width = self._get_blocky_text_width(title_text)
+            title_x = panel_x + (panel_w - title_width) // 2
+            self._draw_blocky_text(title_x, panel_y + 15, title_text, MOOD_MENU_TEXT_COLOR)
+        else:
+            self.canvas.create_text((panel_x + panel_w//2)*px, (panel_y + 20)*px,
+                                    text=title_text, fill=MOOD_MENU_TEXT_COLOR,
+                                    font=MOOD_MENU_FONT, anchor="n")
+        
+        # Task list area
+        list_start_y = panel_y + 60
+        max_visible = 8
+        
+        for i, item in enumerate(self.todo_items[:max_visible]):
+            item_y = list_start_y + i * MOOD_MENU_ITEM_HEIGHT
+            is_selected = (i == self.todo_selected_index)
+            
+            # Item background - same hover style as menus
+            if is_selected:
+                self.canvas.create_rectangle((panel_x + 10)*px, item_y*px,
+                                             (panel_x + panel_w - 10)*px, (item_y + MOOD_MENU_ITEM_HEIGHT)*px,
+                                             fill=MOOD_MENU_HOVER_BG, outline="")
+                # Left accent bar
+                self.canvas.create_rectangle((panel_x + 6)*px, item_y*px,
+                                             (panel_x + 8)*px, (item_y + MOOD_MENU_ITEM_HEIGHT)*px,
+                                             fill=MOOD_MENU_ACCENT, outline="")
+            
+            # Checkbox
+            checkbox_x = panel_x + 20
+            checkbox_y = item_y + 8
+            checkbox_size = 12
+            
+            self.canvas.create_rectangle(checkbox_x*px, checkbox_y*px,
+                                         (checkbox_x + checkbox_size)*px, (checkbox_y + checkbox_size)*px,
+                                         outline=MOOD_MENU_TEXT_COLOR, width=1, fill="")
+            
+            if item.get('completed', False):
+                # Checkmark
+                self.canvas.create_line((checkbox_x + 2)*px, (checkbox_y + 6)*px,
+                                        (checkbox_x + 5)*px, (checkbox_y + 9)*px,
+                                        fill=MOOD_MENU_ACCENT, width=2)
+                self.canvas.create_line((checkbox_x + 5)*px, (checkbox_y + 9)*px,
+                                        (checkbox_x + 10)*px, (checkbox_y + 4)*px,
+                                        fill=MOOD_MENU_ACCENT, width=2)
+            
+            # Task text
+            text_x = checkbox_x + 20
+            text_color = MOOD_MENU_HOVER_TEXT if is_selected else MOOD_MENU_TEXT_COLOR
+            if item.get('completed', False):
+                text_color = "#888888"
+                
+            # Show edit mode
+            if is_selected and self.todo_editing:
+                display_text = self.todo_edit_text + "_"
+                text_color = MOOD_MENU_ACCENT
+            else:
+                display_text = item['text']
+                if len(display_text) > 30:
+                    display_text = display_text[:27] + "..."
+            
+            if USE_BLOCKY_FONT:
+                self._draw_blocky_text(text_x, item_y + 8, display_text, text_color)
+            else:
+                self.canvas.create_text(text_x*px, (item_y + 12)*px,
+                                        text=display_text, fill=text_color,
+                                        font=MOOD_MENU_DESC_FONT, anchor="w")
+        
+        # Action buttons at bottom
+        button_y = panel_y + panel_h - 80
+        button_width = 80
+        button_height = 25
+        button_spacing = 10
+        
+        buttons = ["Add New", "Edit", "Delete", "Toggle"]
+        total_width = len(buttons) * button_width + (len(buttons) - 1) * button_spacing
+        start_x = panel_x + (panel_w - total_width) // 2
+        
+        # Clear button boxes for hit detection
+        self.todo_button_boxes = []
+        
+        for i, button_text in enumerate(buttons):
+            btn_x = start_x + i * (button_width + button_spacing)
+            
+            # Store button rectangle for hit detection
+            self.todo_button_boxes.append((btn_x, button_y, btn_x + button_width, button_y + button_height))
+            
+            # Button background with hover effect
+            is_hovered = (i == self.todo_button_hover)
+            bg_color = MOOD_MENU_ACCENT if is_hovered else MOOD_MENU_HOVER_BG
+            text_color = MOOD_MENU_BG if is_hovered else MOOD_MENU_TEXT_COLOR
+            
+            self.canvas.create_rectangle(btn_x*px, button_y*px,
+                                         (btn_x + button_width)*px, (button_y + button_height)*px,
+                                         fill=bg_color, outline=MOOD_MENU_BORDER, width=1)
+            
+            # Button text
+            self.canvas.create_text((btn_x + button_width//2)*px, (button_y + button_height//2)*px,
+                                    text=button_text, fill=text_color,
+                                    font=("Courier New", 8), anchor="center")
+        
+        # Show input overlay if in input mode
+        if self.todo_input_mode:
+            input_y = panel_y + panel_h - 130
+            self.canvas.create_rectangle((panel_x + 10)*px, input_y*px,
+                                         (panel_x + panel_w - 10)*px, (input_y + 30)*px,
+                                         fill="#1a1a2e", outline=MOOD_MENU_ACCENT, width=2)
+            
+            self.canvas.create_text((panel_x + 15)*px, (input_y + 15)*px,
+                                   text=f"New task: {self.todo_input_text}_", fill=MOOD_MENU_TEXT_COLOR,
+                                   font=("Courier New", 10), anchor="w")
+        
+        # Instructions
+        inst_y = panel_y + panel_h - 40
+        if self.todo_input_mode:
+            instructions = "Type task name  ENTER Save  ESC Cancel"
+        elif self.todo_editing:
+            instructions = "Type new name  ENTER Save  ESC Cancel"
+        else:
+            instructions = "WS Navigate  Click buttons  E Edit  ESC Exit"
+        self.canvas.create_text((panel_x + panel_w//2)*px, inst_y*px,
+                                text=instructions, fill=MOOD_MENU_TEXT_COLOR,
+                                font=("Courier New", 8), anchor="center")
+
+    # -------- Fireplace Methods --------
+    def toggle_fireplace(self):
+        """Start or stop the fireplace sound and switch to fireplace scene with transition."""
+        if not self.fireplace_loaded:
+            print("[WARN] Fireplace sound not loaded")
+            return
+            
+        if self.fireplace_playing:
+            # Stop fireplace and return to inside scene with transition
+            if self.fireplace_channel:
+                self.fireplace_channel.stop()
+                self.fireplace_channel = None
+            self.fireplace_playing = False
+            # Use proper fade transition back to inside scene
+            self.scene.trigger_fade_from_fireplace()
+            print("[INFO] Fireplace stopped, transitioning back to inside")
+        else:
+            # Start fireplace sound and trigger transition to fireplace scene
+            try:
+                self.fireplace_channel = self.fireplace_sound.play(loops=-1)
+                self.fireplace_playing = True
+                # Hide menus when transitioning to fireplace scene
+                self.cozy_submenu_active = False
+                self.menu_active = False
+                # Trigger smooth transition to fireplace scene
+                self.scene.trigger_fade_to_fireplace()
+                print("[INFO] Fireplace started, transitioning to fireplace scene")
+            except Exception as e:
+                print(f"[WARN] Could not start fireplace: {e}")
 
     def _choose_pixel_font(self):
         try:

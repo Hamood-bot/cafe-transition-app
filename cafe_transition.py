@@ -662,14 +662,12 @@ class CafeApp:
                 self.open_calendar_window()
                 return
         # Cozy music change button click
-        if self.cozy_music_button and self.scene.state == SceneManager.STATE_INSIDE and self.menu_selected_index != -1:
-            # check if Cozy selected
-            label, _ = MOOD_MENU_ITEMS[self.menu_selected_index]
-            if label == 'Cozy':
-                bx1, by1, bx2, by2 = self.cozy_music_button
-                if bx1 <= event.x <= bx2 and by1 <= event.y <= by2:
-                    self.pick_new_music()
-                    return
+        if self.cozy_music_button and self.scene.state == SceneManager.STATE_INSIDE:
+            # Music button works regardless of mood selection
+            bx1, by1, bx2, by2 = self.cozy_music_button
+            if bx1 <= event.x <= bx2 and by1 <= event.y <= by2:
+                self.pick_new_music()
+                return
         if self.scene.state == SceneManager.STATE_OUTSIDE:
             if CLICK_ANYWHERE_OUTSIDE:
                 self.scene.trigger_fade()
@@ -948,12 +946,12 @@ class CafeApp:
             messagebox.showerror('Music Error', f'Could not play file:\n{e}')
 
     def draw_cozy_music_button(self):
-        # Always show the music button when a mood is selected and in the inside scene
-        if self.menu_selected_index == -1 or self.scene.state != SceneManager.STATE_INSIDE:
+        # Always show the music button when in the inside scene
+        if self.scene.state != SceneManager.STATE_INSIDE:
             self.cozy_music_button = None
             return
         
-        # Show music button for any selected mood, not just Cozy
+        # Show music button always when inside, regardless of mood selection
         # draw top-right small button
         w = self.width * self.scale
         pad = 6

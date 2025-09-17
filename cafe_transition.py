@@ -169,9 +169,22 @@ def _expand_centered(box, new_size):
     half = new_size//2
     return (cx-half, cy-half, cx+half, cy+half)
 
+def _expand_rightward(box, new_size, right_bias=2.5):
+    """Expand hitbox with extra extension to the right for easier clicking."""
+    x1,y1,x2,y2 = box
+    cx = (x1 + x2)//2
+    cy = (y1 + y2)//2
+    half = new_size//2
+    
+    # Calculate left and right extensions with bias toward right
+    left_extend = int(half / right_bias)
+    right_extend = new_size - left_extend
+    
+    return (cx-left_extend, cy-half, cx+right_extend, cy+half)
+
 ENLARGED_INTERACTIVE_SIZE = 200  # logical pixels (square) - made even bigger for easier clicking
-BOOK_HITBOX = _expand_centered(BOOK_HITBOX, ENLARGED_INTERACTIVE_SIZE)
-CALENDAR_HITBOX = _expand_centered(CALENDAR_HITBOX, ENLARGED_INTERACTIVE_SIZE)
+BOOK_HITBOX = _expand_rightward(BOOK_HITBOX, ENLARGED_INTERACTIVE_SIZE)
+CALENDAR_HITBOX = _expand_rightward(CALENDAR_HITBOX, ENLARGED_INTERACTIVE_SIZE)
 
 # Hover highlight styling
 FOCUSED_HOVER_OUTLINE = '#ffd27f'

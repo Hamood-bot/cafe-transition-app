@@ -53,8 +53,8 @@ TEAR_BG_SHADE = (245,242,233,255)  # paper color for revealed edge fringe
 TEAR_FRINGE_THICKNESS = 14 # thickness of fringe highlight mask
 LOOP = True
 
-# Door hotspot (x1, y1, x2, y2) in original GIF pixel coordinates
-DOOR_HITBOX = (50, 40, 70, 90)  # Adjust after you add real outside.gif
+# Door hotspot (x1, y1, x2, y2) in original GIF pixel coordinates - enlarged for easier clicking
+DOOR_HITBOX = (20, 20, 120, 120)  # Much larger door hitbox from left to right
 CLICK_ANYWHERE_OUTSIDE = True  # If True, any click while outside starts transition
 SHOW_DOOR_DEBUG = False        # If True, draws red door hotspot rectangle
 SHOW_FOCUSED_DEBUG = False     # If True, draws book/calendar hitboxes in focused scene
@@ -103,8 +103,7 @@ COZY_SUBMENU_ITEMS = [
 
 # Focused submenu configuration
 FOCUSED_SUBMENU_ITEMS = [
-    ("Notebook", "write & journal"),
-    ("Calendar", "view & plan dates"),
+    ("Study Zone", "focus & concentrate"),
     ("To-Do List", "organize your tasks")
 ]
 
@@ -126,7 +125,7 @@ PHONE_GAME_OFFSET_Y = 52 # Vertical offset from phone top edge (centered in scre
 PONG_BALL_SIZE = 3       # Ball size
 PONG_PADDLE_WIDTH = 6    # Paddle width
 PONG_PADDLE_HEIGHT = 25  # Paddle height
-PONG_PADDLE_SPEED = 3    # Paddle movement speed
+PONG_PADDLE_SPEED = 4    # Paddle movement speed (increased from 2 for faster movement)
 PONG_BALL_SPEED = 2      # Ball movement speed
 
 # Meditation timer configuration
@@ -179,7 +178,7 @@ def _expand_centered(box, new_size):
     half = new_size//2
     return (cx-half, cy-half, cx+half, cy+half)
 
-def _expand_rightward(box, new_size, right_bias=2.5):
+def _expand_rightward(box, new_size, right_bias=1.5):
     """Expand hitbox with extra extension to the right for easier clicking."""
     x1,y1,x2,y2 = box
     cx = (x1 + x2)//2
@@ -192,9 +191,23 @@ def _expand_rightward(box, new_size, right_bias=2.5):
     
     return (cx-left_extend, cy-half, cx+right_extend, cy+half)
 
-ENLARGED_INTERACTIVE_SIZE = 200  # logical pixels (square) - made even bigger for easier clicking
-BOOK_HITBOX = _expand_rightward(BOOK_HITBOX, ENLARGED_INTERACTIVE_SIZE)
-CALENDAR_HITBOX = _expand_rightward(CALENDAR_HITBOX, ENLARGED_INTERACTIVE_SIZE)
+def _expand_horizontal(box, width, height):
+    """Expand hitbox horizontally (left to right) with specified width and height."""
+    x1,y1,x2,y2 = box
+    cx = (x1 + x2)//2
+    cy = (y1 + y2)//2
+    half_width = width//2
+    half_height = height//2
+    
+    return (cx-half_width, cy-half_height, cx+half_width, cy+half_height)
+
+ENLARGED_INTERACTIVE_SIZE = 300  # logical pixels (square) - made even bigger for easier clicking
+HORIZONTAL_WIDTH = 400  # Even wider horizontal coverage
+HORIZONTAL_HEIGHT = 150  # Reasonable height coverage
+BOOK_HORIZONTAL_WIDTH = 600  # Extra wide horizontal coverage specifically for book
+BOOK_HORIZONTAL_HEIGHT = 200  # Taller coverage for book area
+BOOK_HITBOX = _expand_horizontal(BOOK_HITBOX, BOOK_HORIZONTAL_WIDTH, BOOK_HORIZONTAL_HEIGHT)
+CALENDAR_HITBOX = _expand_horizontal(CALENDAR_HITBOX, HORIZONTAL_WIDTH, HORIZONTAL_HEIGHT)
 
 # Hover highlight styling
 FOCUSED_HOVER_OUTLINE = '#ffd27f'
@@ -603,6 +616,10 @@ class CafeApp:
         self.todo_items = []
         self.todo_selected_index = 0
         
+        # Calendar events state
+        self.calendar_events = {}  # Format: {"YYYY-MM-DD": [{"title": "Event", "time": "10:00", "description": ""}]}
+        self.load_calendar_events()
+        
         self.hover_sound_loaded = False
         self.typing_sound_loaded = False
         self.last_typing_sound_time = 0.0
@@ -727,10 +744,8 @@ class CafeApp:
                     self.focused_submenu_selected = label
                     self.focused_submenu_active = False
                     
-                    if label == "Notebook":
-                        self.scene.trigger_fade_to_focused()  # Go to focused scene for notebook
-                    elif label == "Calendar":
-                        self.scene.trigger_fade_to_focused()  # Go to focused scene for calendar
+                    if label == "Study Zone":
+                        self.scene.trigger_fade_to_focused()  # Go to focused scene for study zone
                     elif label == "To-Do List":
                         self.start_todo_list()  # New to-do list function
                     return
@@ -834,11 +849,13 @@ class CafeApp:
         
         # Update phone game if active
         if self.phone_game_active and self.ping_pong_game:
-            # Handle continuous key input for smooth paddle movement
-            if 'w' in self.keys_pressed or 'Up' in self.keys_pressed:
-                self.ping_pong_game.move_player_up()
-            if 's' in self.keys_pressed or 'Down' in self.keys_pressed:
-                self.ping_pong_game.move_player_down()
+            # Handle continuous key input for smooth paddle movement (backup system)
+            keys_to_check = list(self.keys_pressed)  # Convert to list to avoid set changes during iteration
+            for key in keys_to_check:
+                if key.lower() in ('w', 'up'):
+                    self.ping_pong_game.move_player_up()
+                elif key.lower() in ('s', 'down'):
+                    self.ping_pong_game.move_player_down()
             
             self.ping_pong_game.update()
             
@@ -1405,12 +1422,22 @@ class CafeApp:
                 self.cozy_submenu_active = True  # Return to cozy submenu
                 return
                 
-        # Phone game controls - only handle ESC for exit, movement is now continuous
+        # Phone game controls - simple direct key handling that works
         if self.phone_game_active and self.ping_pong_game:
             if event.keysym == 'Escape':
                 self.phone_game_active = False
                 self.ping_pong_game = None
                 self.cozy_submenu_active = True  # Return to cozy submenu
+                return
+            elif event.keysym in ('w', 'W', 'Up'):
+                # Move up multiple times for smoother movement
+                for _ in range(2):
+                    self.ping_pong_game.move_player_up()
+                return
+            elif event.keysym in ('s', 'S', 'Down'):
+                # Move down multiple times for smoother movement  
+                for _ in range(2):
+                    self.ping_pong_game.move_player_down()
                 return
                 
         # To-do list controls
@@ -1563,10 +1590,8 @@ class CafeApp:
                     label, _ = FOCUSED_SUBMENU_ITEMS[self.focused_submenu_hover_index]
                     self.focused_submenu_selected = label
                     self.focused_submenu_active = False
-                    if label == "Notebook":
-                        self.scene.trigger_fade_to_focused()  # Go to focused scene for notebook
-                    elif label == "Calendar":
-                        self.scene.trigger_fade_to_focused()  # Go to focused scene for calendar
+                    if label == "Study Zone":
+                        self.scene.trigger_fade_to_focused()  # Go to focused scene for study zone
                     elif label == "To-Do List":
                         self.start_todo_list()  # New to-do list function
             elif event.keysym == 'Escape':
@@ -2497,6 +2522,10 @@ class CafeApp:
         game_h = int(PHONE_GAME_HEIGHT * PHONE_GAME_SCALE)
         self.ping_pong_game = PingPongGame(game_w, game_h, PONG_BALL_SPEED, PONG_PADDLE_SPEED)
         
+        # Ensure window has focus for key events
+        self.root.focus_force()
+        self.canvas.focus_set()  # Also set focus on canvas
+        
     def draw_phone_game(self):
         if not self.phone_image or not self.ping_pong_game:
             return
@@ -2765,6 +2794,55 @@ class CafeApp:
         if 0 <= index < len(self.todo_items):
             self.todo_items[index]["completed"] = not self.todo_items[index]["completed"]
             self.save_todo_items()
+    
+    def load_calendar_events(self):
+        """Load calendar events from persistent storage."""
+        calendar_save_file = os.path.join(ASSETS_DIR, 'calendar_events.json')
+        try:
+            if os.path.exists(calendar_save_file):
+                with open(calendar_save_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    self.calendar_events = data.get('events', {})
+            else:
+                self.calendar_events = {}
+        except Exception as e:
+            print(f"[WARN] Failed to load calendar events: {e}")
+            self.calendar_events = {}
+    
+    def save_calendar_events(self):
+        """Save calendar events to persistent storage."""
+        calendar_save_file = os.path.join(ASSETS_DIR, 'calendar_events.json')
+        try:
+            os.makedirs(ASSETS_DIR, exist_ok=True)
+            data = {
+                'events': self.calendar_events,
+                'last_saved': datetime.now().isoformat()
+            }
+            with open(calendar_save_file, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2)
+        except Exception as e:
+            print(f"[WARN] Failed to save calendar events: {e}")
+    
+    def add_calendar_event(self, date_str, title, time="", description=""):
+        """Add an event to a specific date."""
+        if date_str not in self.calendar_events:
+            self.calendar_events[date_str] = []
+        
+        event = {
+            "title": title,
+            "time": time,
+            "description": description
+        }
+        self.calendar_events[date_str].append(event)
+        self.save_calendar_events()
+    
+    def get_events_for_date(self, date_str):
+        """Get all events for a specific date."""
+        return self.calendar_events.get(date_str, [])
+    
+    def has_events_for_date(self, date_str):
+        """Check if a date has any events."""
+        return date_str in self.calendar_events and len(self.calendar_events[date_str]) > 0
     
     def draw_todo_list_overlay(self):
         """Draw simple menu-style to-do list overlay."""
@@ -3559,57 +3637,462 @@ class CafeApp:
                         )
 
     def open_calendar_window(self):
+        print("[DEBUG] Calendar window opening...")  # Debug print
         # Check if calendar window already exists
         if hasattr(self, 'cal_win') and self.cal_win:
             try:
                 if self.cal_win.winfo_exists():
+                    print("[DEBUG] Calendar window already exists, bringing to front")
                     self.cal_win.lift()
+                    self.cal_win.attributes('-topmost', True)
+                    self.cal_win.after(1000, lambda: self.cal_win.attributes('-topmost', False))
                     return
             except tk.TclError:
                 # Window was destroyed, proceed to create new one
+                print("[DEBUG] Previous calendar window was destroyed, creating new one")
                 pass
         win = tk.Toplevel(self.root)
-        win.title("Calendar")
+        win.title("Enhanced Calendar")
         win.configure(bg="#0c0c0c")
-        cell_w, cell_h = 54, 42  # enlarged cells
-        pad = 10
+        
+        # Calculate window size
+        cell_w, cell_h = 70, 55  # Larger cells for better event display
+        pad = 15
         width = cell_w*7 + pad*2
-        height = cell_h*7 + 95  # Increased from 90 to 95 to accommodate larger header
-        win.geometry(f"{width}x{height}")
-        win.resizable(False, False)  # Prevent maximizing and resizing
+        height = cell_h*7 + 110  # More space for enhanced header
+        
+        # Simple positioning - start at top-left and let user move if needed
+        win.geometry(f"{width}x{height}+100+100")
+        win.resizable(True, True)  # Allow resizing to fix if window gets stuck
+        win.lift()  # Bring to front
+        win.attributes('-topmost', True)  # Keep on top temporarily
+        
+        # Remove topmost after a delay and print debug info
+        def remove_topmost():
+            try:
+                win.attributes('-topmost', False)
+                print(f"[DEBUG] Calendar window opened at size {width}x{height}")
+            except:
+                pass
+        win.after(2000, remove_topmost)  # Keep on top for 2 seconds
         cv = tk.Canvas(win, width=width, height=height, bg="#0c0c0c", highlightthickness=0)
         cv.pack(fill='both', expand=True)
         now = datetime.now()
         year, month = now.year, now.month
-        # Header stylized with proper spacing to prevent overlap
+        
+        # Enhanced header with gradient effect
         header_text = now.strftime("%B %Y").upper()
-        cv.create_rectangle(0,0,width,65, fill="#d3031c", outline="")  # Increased height to 65
-        cv.create_text(width//2, 16, text=header_text, fill="#ffffff", font=("Courier New", 16, 'bold'), anchor='n')  # Reduced font from 18 to 16
-        cv.create_text(width//2, 42, text="STAY ON TRACK", fill="#fffbe6", font=("Courier New", 10, 'bold'))  # Moved down from 38 to 42
-        # Weekday labels - adjusted for increased header height
-        weekdays = ['M','T','W','T','F','S','S']
+        cv.create_rectangle(0,0,width,75, fill="#d3031c", outline="")  # Main header
+        cv.create_rectangle(0,0,width,15, fill="#ff4444", outline="")  # Top gradient
+        cv.create_text(width//2, 15, text=header_text, fill="#ffffff", font=("Courier New", 18, 'bold'), anchor='n')
+        cv.create_text(width//2, 45, text="📅 CLICK ANY DAY TO ADD EVENTS", fill="#fffbe6", font=("Courier New", 10, 'bold'))
+        cv.create_text(width//2, 62, text="Events are saved automatically", fill="#cccccc", font=("Courier New", 8))
+        
+        # Weekday labels with background
+        weekdays = ['MON','TUE','WED','THU','FRI','SAT','SUN']
         for i, wd in enumerate(weekdays):
-            cv.create_text(pad + cell_w*i + cell_w/2, 75, text=wd, fill="#ffffff", font=("Courier New", 12, 'bold'))  # Moved from 70 to 75
-        # Calendar grid generation (Monday=0) - adjusted for increased header height
+            x_pos = pad + cell_w*i + cell_w/2
+            cv.create_rectangle(pad + cell_w*i, 82, pad + cell_w*i + cell_w, 102, fill="#262626", outline="#666")
+            cv.create_text(x_pos, 92, text=wd, fill="#ffffff", font=("Courier New", 9, 'bold'))
+        # Enhanced calendar grid generation (Monday=0)
         month_cal = calendar.Calendar(firstweekday=0).monthdayscalendar(year, month)
-        start_y = 95  # Moved from 90 to 95
+        start_y = 110  # Adjusted for enhanced header
         today_day = now.day
+        
+        # Store day positions for click detection
+        day_positions = {}
+        
         for row_idx, week in enumerate(month_cal):
             for col_idx, day in enumerate(week):
                 if day == 0:
                     continue
                 x = pad + col_idx * cell_w
                 y = start_y + row_idx * cell_h
-                # Slight skew effect by drawing layered rectangles
-                base_color = "#1b1b1b"
-                if day == today_day:
+                
+                # Create date string for events
+                date_str = f"{year}-{month:02d}-{day:02d}"
+                events = self.get_events_for_date(date_str)
+                event_count = len(events)
+                
+                # Store position for click detection
+                day_positions[day] = (x, y, x+cell_w-2, y+cell_h-2, date_str)
+                
+                # Enhanced cell appearance
+                is_today = (day == today_day)
+                is_weekend = (col_idx >= 5)
+                has_events = (event_count > 0)
+                
+                # Base colors
+                if is_today:
                     base_color = "#ffec00"
-                elif col_idx >=5:  # weekend
+                    text_color = "#000000"
+                    border_color = "#ff8800"
+                elif has_events:
+                    base_color = "#2a5298"  # Blue for events
+                    text_color = "#ffffff"
+                    border_color = "#4477cc"
+                elif is_weekend:
+                    base_color = "#1a1a1a"
+                    text_color = "#cccccc"
+                    border_color = "#444444"
+                else:
                     base_color = "#262626"
-                cv.create_rectangle(x+2, y+4, x+cell_w-3, y+cell_h+2, fill="#000", outline="")  # shadow
-                cv.create_rectangle(x, y, x+cell_w-3, y+cell_h-3, fill=base_color, outline="#666")
-                cv.create_text(x+cell_w/2-2, y+cell_h/2-6, text=str(day), fill="#000" if day==today_day else "#ffffff", font=("Courier New", 12, 'bold'))
+                    text_color = "#ffffff"
+                    border_color = "#666666"
+                
+                # Draw cell shadow
+                cv.create_rectangle(x+3, y+3, x+cell_w+1, y+cell_h+1, fill="#000000", outline="")
+                
+                # Draw main cell
+                cv.create_rectangle(x, y, x+cell_w-2, y+cell_h-2, fill=base_color, outline=border_color, width=2)
+                
+                # Draw day number
+                cv.create_text(x+cell_w/2, y+12, text=str(day), fill=text_color, 
+                               font=("Courier New", 14, 'bold'), anchor='n')
+                
+                # Event indicators
+                if has_events:
+                    # Event count badge
+                    badge_x = x + cell_w - 15
+                    badge_y = y + 5
+                    cv.create_oval(badge_x-8, badge_y-6, badge_x+8, badge_y+6, 
+                                   fill="#d3031c", outline="#ffffff", width=1)
+                    cv.create_text(badge_x, badge_y, text=str(event_count), 
+                                   fill="#ffffff", font=("Courier New", 8, 'bold'))
+                    
+                    # Show first event preview (if space allows)
+                    if event_count > 0:
+                        first_event = events[0]
+                        preview_text = first_event.get('title', '')
+                        if len(preview_text) > 8:
+                            preview_text = preview_text[:6] + "..."
+                        
+                        # Event preview text
+                        cv.create_text(x+cell_w/2, y+cell_h-8, text=preview_text, 
+                                       fill="#ffffcc", font=("Courier New", 7), anchor='s')
+                
+                # Hover effect preparation (will be added via bind)
+                def create_hover_handler(day_num, x_pos, y_pos, events_list):
+                    def on_enter(event):
+                        if events_list:
+                            # Show tooltip with events
+                            tooltip_text = f"{len(events_list)} event(s):\n"
+                            for i, evt in enumerate(events_list[:3]):  # Show max 3
+                                tooltip_text += f"• {evt.get('title', 'Untitled')}"
+                                if evt.get('time'):
+                                    tooltip_text += f" ({evt['time']})"
+                                tooltip_text += "\n"
+                            if len(events_list) > 3:
+                                tooltip_text += "..."
+                    return on_enter
+                
+                # Make cells interactive
+                cell_id = cv.create_rectangle(x, y, x+cell_w-2, y+cell_h-2, fill="", outline="", width=0)
+        
+        # Add click handler for calendar days
+        def on_calendar_click(event):
+            click_x, click_y = event.x, event.y
+            for day, (x1, y1, x2, y2, date_str) in day_positions.items():
+                if x1 <= click_x <= x2 and y1 <= click_y <= y2:
+                    self.open_day_events_window(date_str, day, month, year)
+                    break
+        
+        cv.bind("<Button-1>", on_calendar_click)
+        cv.focus_set()  # Allow the canvas to receive focus for key events
+        
+        # Add escape key to close window
+        def close_calendar(event=None):
+            win.destroy()
+        
+        win.bind("<Escape>", close_calendar)
+        cv.bind("<Escape>", close_calendar)
+        
         self.cal_win = win
+
+    def open_day_events_window(self, date_str, day, month, year):
+        """Open a window to view and manage events for a specific day."""
+        # Check if day events window already exists
+        if hasattr(self, 'day_events_win') and self.day_events_win:
+            try:
+                if self.day_events_win.winfo_exists():
+                    self.day_events_win.destroy()
+            except tk.TclError:
+                pass
+        
+        win = tk.Toplevel(self.root)
+        win.title(f"📅 Events - {calendar.month_name[month]} {day}, {year}")
+        win.configure(bg="#0c0c0c")
+        win.geometry("500x750+150+100")
+        win.resizable(True, True)  # Allow resizing to see content better
+        
+        # Ensure the window appears on top
+        win.lift()
+        win.attributes('-topmost', True)
+        win.after(1000, lambda: win.attributes('-topmost', False))  # Remove topmost after 1 second
+        win.focus_force()  # Force focus to this window
+        
+        # Enhanced header with gradient
+        header_frame = tk.Frame(win, bg="#d3031c", height=80)
+        header_frame.pack(fill='x')
+        header_frame.pack_propagate(False)
+        
+        # Date display
+        date_label = tk.Label(header_frame, text=f"{calendar.month_name[month]} {day}", 
+                              bg="#d3031c", fg="#ffffff", font=("Courier New", 20, 'bold'))
+        date_label.pack(pady=(10, 0))
+        
+        year_label = tk.Label(header_frame, text=str(year), 
+                              bg="#d3031c", fg="#ffcccc", font=("Courier New", 12))
+        year_label.pack()
+        
+        # Event count indicator
+        events = self.get_events_for_date(date_str)
+        event_count = len(events)
+        count_label = tk.Label(header_frame, text=f"📋 {event_count} Event{'s' if event_count != 1 else ''}", 
+                               bg="#d3031c", fg="#fffbe6", font=("Courier New", 10, 'bold'))
+        count_label.pack(pady=(5, 10))
+        
+        # Main content area with scrolling
+        main_frame = tk.Frame(win, bg="#0c0c0c")
+        main_frame.pack(fill='both', expand=True, padx=15, pady=15)
+        
+        # Create scrollable canvas for events
+        canvas = tk.Canvas(main_frame, bg="#0c0c0c", highlightthickness=0, height=200)
+        scrollbar = tk.Scrollbar(main_frame, orient="vertical", command=canvas.yview, 
+                                 bg="#1a1a1a", troughcolor="#0c0c0c", activebackground="#d3031c")
+        scrollable_frame = tk.Frame(canvas, bg="#0c0c0c")
+        
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        # Events display with enhanced styling
+        if events:
+            for i, event in enumerate(events):
+                # Event card with modern design
+                event_card = tk.Frame(scrollable_frame, bg="#1a1a1a", relief='flat', bd=0)
+                event_card.pack(fill='x', pady=(0, 12), padx=5)
+                
+                # Add subtle shadow effect with border
+                shadow_frame = tk.Frame(event_card, bg="#333333", height=2)
+                shadow_frame.pack(fill='x', side='bottom')
+                
+                time_text = event.get('time', '')
+                title_text = event.get('title', 'Untitled Event')
+                desc_text = event.get('description', '')
+                
+                # Event header with gradient-like effect
+                header_frame = tk.Frame(event_card, bg="#d3031c", height=40)
+                header_frame.pack(fill='x')
+                header_frame.pack_propagate(False)
+                
+                # Time badge
+                if time_text:
+                    time_badge = tk.Label(header_frame, text=f"🕒 {time_text}", 
+                                          bg="#d3031c", fg="#ffffff", font=("Courier New", 11, 'bold'))
+                    time_badge.pack(side='left', padx=15, pady=10)
+                
+                # Delete button with hover effect
+                delete_btn = tk.Button(header_frame, text="✖", 
+                                       bg="#d3031c", fg="#ffffff", bd=0,
+                                       font=("Courier New", 12, 'bold'),
+                                       cursor="hand2", width=3,
+                                       activebackground="#b8021a", activeforeground="#ffffff",
+                                       command=lambda idx=i: self.delete_event(date_str, idx, win))
+                delete_btn.pack(side='right', padx=15, pady=8)
+                
+                # Content area
+                content_frame = tk.Frame(event_card, bg="#1a1a1a")
+                content_frame.pack(fill='x', padx=15, pady=12)
+                
+                # Title with icon
+                title_label = tk.Label(content_frame, text=f"📌 {title_text}", 
+                                       bg="#1a1a1a", fg="#fffbe6", 
+                                       font=("Courier New", 13, 'bold'))
+                title_label.pack(anchor='w')
+                
+                # Description with better formatting
+                if desc_text:
+                    desc_label = tk.Label(content_frame, text=f"📝 {desc_text}", 
+                                          bg="#1a1a1a", fg="#cccccc", 
+                                          font=("Courier New", 10),
+                                          wraplength=400, justify='left')
+                    desc_label.pack(anchor='w', pady=(8, 0))
+        else:
+            # Empty state with better design
+            empty_frame = tk.Frame(scrollable_frame, bg="#0c0c0c")
+            empty_frame.pack(fill='both', expand=True, pady=50)
+            
+            empty_icon = tk.Label(empty_frame, text="📅", bg="#0c0c0c", fg="#666666", 
+                                  font=("Courier New", 30))
+            empty_icon.pack()
+            
+            empty_text = tk.Label(empty_frame, text="No events scheduled", 
+                                  bg="#0c0c0c", fg="#888888", 
+                                  font=("Courier New", 14, 'bold'))
+            empty_text.pack(pady=(10, 5))
+            
+            empty_subtitle = tk.Label(empty_frame, text="Click 'Add Event' below to create one!", 
+                                      bg="#0c0c0c", fg="#666666", 
+                                      font=("Courier New", 10))
+            empty_subtitle.pack()
+        
+        # Pack scrolling components
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        # Enhanced Add Event Section with menu consistency
+        add_frame = tk.Frame(win, bg="#1a1a1a", relief='raised', bd=2)
+        add_frame.pack(fill='x', padx=10, pady=(10, 15))
+        
+        # Add event header with menu styling
+        header_add = tk.Frame(add_frame, bg="#d3031c", height=45)
+        header_add.pack(fill='x')
+        header_add.pack_propagate(False)
+        
+        add_label = tk.Label(header_add, text="📝 ADD NEW EVENT", 
+                             bg="#d3031c", fg="#ffffff", 
+                             font=("Courier New", 14, 'bold'))
+        add_label.pack(pady=12)
+        
+        # Form container with menu styling
+        form_frame = tk.Frame(add_frame, bg="#2a2a2a")
+        form_frame.pack(fill='x', padx=15, pady=15)
+        
+        # Title entry with menu-consistent styling
+        title_container = tk.Frame(form_frame, bg="#2a2a2a")
+        title_container.pack(fill='x', pady=(0, 10))
+        
+        title_label = tk.Label(title_container, text="EVENT TITLE:", 
+                               bg="#2a2a2a", fg="#ffffff", 
+                               font=("Courier New", 11, 'bold'))
+        title_label.pack(anchor='w')
+        
+        title_entry = tk.Entry(title_container, bg="#ffffff", fg="#000000", 
+                               font=("Courier New", 11), relief='flat', bd=3,
+                               insertbackground="#000000")
+        title_entry.pack(fill='x', pady=(5, 0))
+        
+        # Time entry with menu-consistent styling
+        time_container = tk.Frame(form_frame, bg="#2a2a2a")
+        time_container.pack(fill='x', pady=(0, 10))
+        
+        time_label = tk.Label(time_container, text="TIME:", 
+                              bg="#2a2a2a", fg="#ffffff", 
+                              font=("Courier New", 11, 'bold'))
+        time_label.pack(anchor='w')
+        
+        time_entry = tk.Entry(time_container, bg="#ffffff", fg="#000000", 
+                              font=("Courier New", 11), relief='flat', bd=3,
+                              insertbackground="#000000")
+        time_entry.pack(fill='x', pady=(5, 0))
+        time_entry.insert(0, "10:00 AM")  # Default time with AM/PM
+        
+        # Description entry with menu-consistent styling
+        desc_container = tk.Frame(form_frame, bg="#2a2a2a")
+        desc_container.pack(fill='x', pady=(0, 15))
+        
+        desc_label = tk.Label(desc_container, text="DESCRIPTION:", 
+                              bg="#2a2a2a", fg="#ffffff", 
+                              font=("Courier New", 11, 'bold'))
+        desc_label.pack(anchor='w')
+        
+        desc_entry = tk.Text(desc_container, bg="#ffffff", fg="#000000", 
+                             font=("Courier New", 10), height=3, relief='flat', bd=3,
+                             insertbackground="#000000", wrap='word')
+        desc_entry.pack(fill='x', pady=(5, 0))
+        
+        # Enhanced Add button with menu-style consistency
+        def add_event():
+            title = title_entry.get().strip()
+            time = time_entry.get().strip()
+            description = desc_entry.get(1.0, tk.END).strip()
+            
+            if title:
+                self.add_calendar_event(date_str, title, time, description)
+                win.destroy()  # Close and refresh
+                self.open_day_events_window(date_str, day, month, year)  # Reopen to show new event
+                # Refresh calendar if it's open
+                if hasattr(self, 'cal_win') and self.cal_win:
+                    try:
+                        if self.cal_win.winfo_exists():
+                            self.cal_win.destroy()
+                            self.open_calendar_window()
+                    except tk.TclError:
+                        pass
+            else:
+                # Show error feedback
+                title_entry.configure(bg="#ffcccc")  # Light red tint for error
+                title_entry.after(1000, lambda: title_entry.configure(bg="#ffffff"))  # Reset to white background
+        
+        # Button frame with proper spacing
+        button_frame = tk.Frame(form_frame, bg="#2a2a2a")
+        button_frame.pack(fill='x', pady=(10, 0))
+        
+        # Add button with menu-style design
+        add_btn = tk.Button(button_frame, text="✅ ADD EVENT", 
+                            bg="#d3031c", fg="#ffffff", 
+                            font=("Courier New", 12, 'bold'), 
+                            relief='flat', bd=0, cursor="hand2",
+                            activebackground="#ff1a33", 
+                            activeforeground="#ffffff",
+                            command=add_event, height=2, padx=20)
+        add_btn.pack(pady=(5, 10))
+        
+        # Add hover effects for consistency
+        def on_enter_btn(e):
+            add_btn.configure(bg="#ff1a33", fg="#ffffff")
+        
+        def on_leave_btn(e):
+            add_btn.configure(bg="#d3031c", fg="#ffffff")
+        
+        add_btn.bind("<Enter>", on_enter_btn)
+        add_btn.bind("<Leave>", on_leave_btn)
+        
+        # Focus on title entry for better UX
+        title_entry.focus_set()
+        
+        # Bind Enter key to add event
+        def on_enter(event):
+            add_event()
+        
+        title_entry.bind('<Return>', on_enter)
+        time_entry.bind('<Return>', on_enter)
+        
+        # Add escape key to close window
+        def close_day_events(event=None):
+            win.destroy()
+        
+        win.bind("<Escape>", close_day_events)
+        title_entry.bind("<Escape>", close_day_events)
+        time_entry.bind("<Escape>", close_day_events)
+        desc_entry.bind("<Escape>", close_day_events)
+        
+        self.day_events_win = win
+
+    def delete_event(self, date_str, event_index, window):
+        """Delete an event from a specific date."""
+        if date_str in self.calendar_events and 0 <= event_index < len(self.calendar_events[date_str]):
+            del self.calendar_events[date_str][event_index]
+            if not self.calendar_events[date_str]:  # Remove empty date entry
+                del self.calendar_events[date_str]
+            self.save_calendar_events()
+            window.destroy()  # Close and refresh
+            # Extract date parts from date_str
+            year, month, day = map(int, date_str.split('-'))
+            self.open_day_events_window(date_str, day, month, year)  # Reopen to show updated events
+            # Refresh calendar if it's open
+            if hasattr(self, 'cal_win') and self.cal_win:
+                try:
+                    if self.cal_win.winfo_exists():
+                        self.cal_win.destroy()
+                        self.open_calendar_window()
+                except tk.TclError:
+                    pass
 
     def play_page_flip(self):
         """Play page flip sound effect."""

@@ -3186,6 +3186,50 @@ class CafeApp:
             "Your taste is a compass",
             "Stay human in the loop",
             "Protect your creative bandwidth",
+            # Longer quotes to allow fuller, flowing readings
+            "Some days are for quiet building: no fanfare, just you and the work, stacking tiny wins until momentum makes the announcement for you.",
+            "If it looks effortless, it's because the effort was paid in advance—early mornings, kind patience, and a thousand little retries no one saw.",
+            "You don't have to move fast; you just have to keep moving—curiosity will tow you across the boring parts and joy will meet you on the other side.",
+            "When the plan gets noisy, listen for the signal: the small task you're avoiding that would make everything else easier or unnecessary.",
+            "Make space for the thing you love to do badly—it's the sandbox where the brilliant version learns how to walk without pressure.",
+            "You are allowed to take your time and still be incredible; speed is a metric, not a personality trait.",
+            "Great work often looks like gentle work—clear boundaries, clean rest, and a focused hour repeated until it starts to look like magic.",
+            "Your taste is not a burden; it's a compass. If something feels off, it probably is—pull the thread and trust what it reveals.",
+            "Let it be fun again: reduce the surface area for friction, invite a little whimsy, and watch how quickly momentum forgives yesterday's stall.",
+            "Sometimes the bravest move is a smaller scope—ship the kernel, learn, then let the next version become obvious.",
+            "The best ideas show up dressed like jokes, hobbies, or detours; treat them kindly and they'll introduce you to something important.",
+            "Don't make it harder than it needs to be—make it lighter than you expected, then carry it further than you thought you could.",
+            "Be generous with your future self: leave notes, name things clearly, and commit messages like you're writing a short story they’ll enjoy rereading.",
+            "Talent is surprisingly common; calm is not. Learn the quiet arts—attention, boundaries, recovery—and watch everything compound.",
+            "You don't need permission to be excited about your own life. Build the small thing that makes you grin, then do it again tomorrow.",
+            "There's a version of you beyond burnout that is playful, precise, and wildly effective—meet them by taking rest as seriously as ambition.",
+            # Motivational punches (short)
+            "Start before you feel ready",
+            "Discipline is a love letter to your future self",
+            "Your pace is still progress",
+            "Tiny steps change big stories",
+            "Consistency compounds quietly",
+            "Focus turns minutes into momentum",
+            "Be brave for ten seconds",
+            "You can do hard things",
+            "Show up, even small",
+            "Future you is watching—impress them",
+            "One page today, a chapter tomorrow",
+            "Momentum starts with a single move",
+            "Done is the door to better",
+            "Practice makes patterns",
+            "Direction beats speed",
+            "Keep the promise you made to yourself",
+            "Win the morning, win the day",
+            "Hard now, easy later",
+            "Little by little becomes a lot",
+            "Turn pressure into presence",
+            # Motivational longer entries
+            "Courage isn’t the absence of fear; it’s the decision that the next step matters more than your comfort—take it, even if it’s small.",
+            "What you repeat becomes who you are: keep the habits that make you proud and let the rest fall away without ceremony.",
+            "You don’t need a perfect plan; you need a faithful rhythm—show up, adjust, repeat, and let consistency do its quiet magic.",
+            "Doubt will always make a case; discipline doesn’t argue back—it just keeps moving, kindly and relentlessly.",
+            "Greatness rarely looks glamorous up close—it looks like showing up on time, trying again, and being kinder than the situation requires.",
         ]
         
         import random
@@ -3200,28 +3244,57 @@ class CafeApp:
             # Use the stored coffee reading for this session
             today_reading = self.current_coffee_reading
             
-            # Reading text (wrapped for better display) - moved higher up
-            reading_y = self.height//2 - 80
-            words = today_reading.split()
-            lines = []
-            current_line = []
-            for word in words:
-                current_line.append(word)
-                if len(' '.join(current_line)) > 45:  # Wrap at ~45 characters
-                    lines.append(' '.join(current_line[:-1]))
-                    current_line = [word]
-            if current_line:
-                lines.append(' '.join(current_line))
-            
-            for i, line in enumerate(lines):
-                line_y = reading_y + (i * 25)
+            # Reading text with dynamic wrap and font size for longer entries
+            # Start higher up; adjust automatically based on number of lines
+            base_y = self.height//2 - 80
+
+            def wrap_words(text, max_chars):
+                words = text.split()
+                lines = []
+                current = []
+                for w in words:
+                    current.append(w)
+                    if len(' '.join(current)) > max_chars:
+                        # move last word to next line
+                        lines.append(' '.join(current[:-1]))
+                        current = [w]
+                if current:
+                    lines.append(' '.join(current))
+                return lines
+
+            max_lines_allowed = 6
+            chosen_font_size = 12
+            chosen_lines = None
+            # Try decreasing font size and increasing wrap width gently
+            for fs in (12, 11, 10, 9, 8):
+                # As font shrinks, allow a few more chars per line
+                max_chars = 45 + (12 - fs) * 5  # 12->45, 11->50, 10->55, 9->60, 8->65
+                candidate = wrap_words(today_reading, max_chars)
+                if len(candidate) <= max_lines_allowed:
+                    chosen_font_size = fs
+                    chosen_lines = candidate
+                    break
+            if chosen_lines is None:
+                # Still too long: hard cap lines and add ellipsis
+                candidate = wrap_words(today_reading, 65)
+                chosen_lines = candidate[:max_lines_allowed]
+                if chosen_lines:
+                    chosen_lines[-1] = chosen_lines[-1] + " ..."
+                chosen_font_size = 8
+
+            # Line spacing scales with font size (approx)
+            line_spacing = 13 + chosen_font_size  # 25 at fs=12, 21 at fs=8
+            reading_y = base_y
+
+            for i, line in enumerate(chosen_lines):
+                line_y = reading_y + (i * line_spacing)
                 self.canvas.create_text((self.width//2)*px, line_y*px,
-                                      text=line, 
-                                      fill="white", 
-                                      font=("Fixedsys", 12, "normal"))
+                                      text=line,
+                                      fill="white",
+                                      font=("Fixedsys", chosen_font_size, "normal"))
             
             # Decorative elements
-            cup_y = reading_y + len(lines) * 25 + 30
+            cup_y = reading_y + len(chosen_lines) * line_spacing + 30
             self.canvas.create_text((self.width//2)*px, cup_y*px,
                                   text="~ Today's Brew Brings Wisdom ~", 
                                   fill="white", 

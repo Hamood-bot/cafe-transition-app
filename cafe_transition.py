@@ -1,5 +1,6 @@
 import os
 import time
+import math
 import tkinter as tk
 from tkinter import messagebox, filedialog
 from PIL import Image, ImageTk, ImageSequence
@@ -16,7 +17,10 @@ OUTSIDE_GIF = os.path.join(ASSETS_DIR, 'outside.gif')
 INSIDE_GIF  = os.path.join(ASSETS_DIR, 'original.gif')
 FOCUSED_GIF = os.path.join(ASSETS_DIR, 'focused.gif')  # scene shown after selecting Focused mood
 FIREPLACE_GIF = os.path.join(ASSETS_DIR, 'fireplace.gif')  # cozy fireplace scene
-BELL_SOUND  = os.path.join(ASSETS_DIR, 'bell.wav')
+COFFEE_GIF = os.path.join(ASSETS_DIR, 'coffee.gif')  # cozy coffee brewing scene
+BELL_SOUND  = os.path.join(ASSETS_DIR, 'bell.wav')  # notification bell sound
+RING_SOUND = os.path.join(ASSETS_DIR, 'ring.mp3')  # coffee completion sound
+COFFEE_SOUND = os.path.join(ASSETS_DIR, 'coffee.mp3')  # coffee brewing sound
 LEAF_IMAGE  = os.path.join(ASSETS_DIR, 'leaf.png')  # user-supplied leaf sprite (prefer small like 16x16 or 24x24)
 RAIN_SOUND  = os.path.join(ASSETS_DIR, 'rain.wav')  # soft looping ambience (optional)
 FIREPLACE_SOUND = os.path.join(ASSETS_DIR, 'fire.mp3')  # cozy fireplace crackling (optional)
@@ -24,7 +28,7 @@ HOVER_SOUND = os.path.join(ASSETS_DIR, 'hover.mp3') # menu hover blip (optional)
 TYPING_SOUND = os.path.join(ASSETS_DIR, 'typing.mp3')  # short subtle key tap (optional)
 PAGEFLIP_SOUND = os.path.join(ASSETS_DIR, 'pageflip.mp3')  # page flip sound for notebook
 MUSIC_DEFAULT = os.path.join(ASSETS_DIR, 'music.mp3')  # default background music (looped)
-MUSIC_VOLUME = 0.45
+MUSIC_VOLUME = 0.35
 TORN_SOUND = os.path.join(ASSETS_DIR, 'tear.wav')      # optional paper tear sfx
 
 # ------------- Display / Scaling Configuration -------------
@@ -97,8 +101,9 @@ MOOD_MENU_ITEMS = [
 # Cozy submenu configuration
 COZY_SUBMENU_ITEMS = [
     ("Meditate", "find inner peace"),
-    ("Phone", "play & relax"),
-    ("Fireplace", "cozy crackling sounds")
+    ("Phone", "tea timer challenge"),
+    ("Fireplace", "cozy crackling sounds"),
+    ("Coffee", "brew & sip")
 ]
 
 # Focused submenu configuration
@@ -116,10 +121,15 @@ CREATIVE_SUBMENU_ITEMS = [
 # Phone game configuration
 PHONE_IMAGE = os.path.join(ASSETS_DIR, 'phone.png')
 PHONE_GAME_WIDTH = 160   # Game area width (matches phone screen width exactly)
-PHONE_GAME_HEIGHT = 235  # Game area height (nearly fills phone screen height)
+PHONE_GAME_HEIGHT = 265  # Game area height (extended to better fill phone screen)
 PHONE_GAME_SCALE = 1.0   # Overall game scale multiplier
 PHONE_GAME_OFFSET_X = 20 # Horizontal offset from phone left edge (aligned with screen)
-PHONE_GAME_OFFSET_Y = 52 # Vertical offset from phone top edge (centered in screen area)
+PHONE_GAME_OFFSET_Y = 37 # Vertical offset from phone top edge (centered with taller game area)
+
+# Tea Timer Challenge configuration
+TEA_TIMER_DURATION = 5.0  # Timer duration in seconds
+TEA_PERFECT_START = 0.3   # Perfect zone starts at 30% of timer
+TEA_PERFECT_END = 0.5     # Perfect zone ends at 50% of timer
 
 # Ping pong game settings
 PONG_BALL_SIZE = 3       # Ball size
@@ -134,6 +144,14 @@ BREATHING_CYCLE_DURATION = 8  # 4 seconds inhale + 4 seconds exhale
 MEDITATION_BG_COLOR = "#1a1a2e"
 MEDITATION_TEXT_COLOR = "#eee2dc"
 MEDITATION_ACCENT_COLOR = "#f4a261"
+
+# Coffee scene configuration
+COFFEE_BG_COLOR = "#3e2723"  # Rich coffee brown
+COFFEE_TEXT_COLOR = "#d7ccc8"  # Light coffee cream
+COFFEE_ACCENT_COLOR = "#8d6e63"  # Medium coffee brown
+COFFEE_STEAM_COLOR = "#ffffff"  # White steam
+COFFEE_BEAN_COLOR = "#5d4037"  # Dark coffee bean
+COFFEE_CUP_COLOR = "#f5f5dc"  # Beige cup color
 
 MOOD_MENU_WIDTH = 300       # widened panel to avoid text overflow with bigger icons
 MOOD_MENU_ITEM_HEIGHT = 32  # taller rows for more separation
@@ -281,9 +299,12 @@ class SceneManager:
     STATE_FADING_TO_FOCUSED = 'fading_to_focused'
     STATE_FADING_TO_FIREPLACE = 'fading_to_fireplace'
     STATE_FADING_FROM_FIREPLACE = 'fading_from_fireplace'
+    STATE_FADING_TO_COFFEE = 'fading_to_coffee'
+    STATE_FADING_FROM_COFFEE = 'fading_from_coffee'
     STATE_FOCUSED = 'focused'
     STATE_TEARING = 'tearing'
     STATE_FIREPLACE = 'fireplace'
+    STATE_COFFEE = 'coffee'
 
     def __init__(self, app):
         self.app = app
@@ -306,6 +327,14 @@ class SceneManager:
             if self.fade_counter >= CROSSFADE_FRAMES:
                 self.state = self.STATE_FIREPLACE
         elif self.state == self.STATE_FADING_FROM_FIREPLACE:
+            self.fade_counter += 1
+            if self.fade_counter >= CROSSFADE_FRAMES:
+                self.state = self.STATE_INSIDE
+        elif self.state == self.STATE_FADING_TO_COFFEE:
+            self.fade_counter += 1
+            if self.fade_counter >= CROSSFADE_FRAMES:
+                self.state = self.STATE_COFFEE
+        elif self.state == self.STATE_FADING_FROM_COFFEE:
             self.fade_counter += 1
             if self.fade_counter >= CROSSFADE_FRAMES:
                 self.state = self.STATE_INSIDE
@@ -334,7 +363,6 @@ class SceneManager:
         else:
             self.state = self.STATE_FADING_TO_FOCUSED
             self.fade_counter = 0
-            self.app.play_bell()
 
     def trigger_fade_to_fireplace(self):
         # Allow triggering from INSIDE only (ignore if already fading or in fireplace)
@@ -353,6 +381,113 @@ class SceneManager:
         print('[DEBUG] trigger_fade_from_fireplace start')
         self.state = self.STATE_FADING_FROM_FIREPLACE
         self.fade_counter = 0
+
+    def trigger_fade_to_coffee(self):
+        # Allow triggering from INSIDE only (ignore if already fading or in coffee scene)
+        if self.state not in (self.STATE_INSIDE,):
+            print(f"[DEBUG] trigger_fade_to_coffee ignored; state={self.state}")
+            return
+        print('[DEBUG] trigger_fade_to_coffee start')
+        self.state = self.STATE_FADING_TO_COFFEE
+        self.fade_counter = 0
+    
+    def trigger_fade_from_coffee(self):
+        # Allow triggering from COFFEE only
+        if self.state not in (self.STATE_COFFEE,):
+            print(f"[DEBUG] trigger_fade_from_coffee ignored; state={self.state}")
+            return
+        print('[DEBUG] trigger_fade_from_coffee start')
+        self.state = self.STATE_FADING_FROM_COFFEE
+        self.fade_counter = 0
+
+class TeaTimerGame:
+    """Tea Timer Challenge - hit the key at the perfect moment for ideal tea"""
+    
+    def __init__(self, width, height):
+        self.width = width
+        self.height = height
+        self.wins = 0  # Track consecutive wins for difficulty scaling
+        self.reset_game()
+        
+    def reset_game(self):
+        """Reset the tea timer game to initial state"""
+        self.timer_elapsed = 0.0
+        # Base timer gets faster with wins - much more aggressive
+        base_time = max(1.5, TEA_TIMER_DURATION - (self.wins * 0.4))
+        self.timer_total = base_time
+        self.game_state = "running"  # "running", "success", "weak", "bitter", "waiting"
+        self.result_message = ""
+        self.result_timer = 0.0
+        
+        # Perfect zone gets much smaller with wins - down to 1% at high levels
+        zone_size = max(0.01, 0.2 - (self.wins * 0.025))  # Starts at 20%, shrinks by 2.5% per win, min 1%
+        zone_center = 0.4  # Keep zone centered at 40%
+        self.perfect_zone_start = zone_center - zone_size/2
+        self.perfect_zone_end = zone_center + zone_size/2
+        
+    def update(self, dt):
+        """Update the tea timer game state"""
+        if self.game_state == "running":
+            self.timer_elapsed += dt
+            
+            # Check if timer has run out (bitter tea)
+            if self.timer_elapsed >= self.timer_total:
+                self.game_state = "bitter"
+                self.result_message = "Too Late! Bitter Tea"
+                self.result_timer = 2.0
+                self.wins = 0  # Reset win streak on failure
+                
+        elif self.game_state in ["success", "weak", "bitter"]:
+            self.result_timer -= dt
+            if self.result_timer <= 0:
+                self.game_state = "waiting"
+                self.result_timer = 1.0
+                
+        elif self.game_state == "waiting":
+            self.result_timer -= dt
+            if self.result_timer <= 0:
+                self.reset_game()
+    
+    def handle_key_press(self):
+        """Handle player key press during tea timing"""
+        if self.game_state != "running":
+            return
+            
+        progress = self.timer_elapsed / self.timer_total
+        
+        if progress < self.perfect_zone_start:
+            # Too early - sweet tea
+            self.game_state = "weak"
+            self.result_message = "Too Early! Tea Too Sweet"
+            self.result_timer = 2.0
+            self.wins = 0  # Reset win streak on failure
+        elif progress <= self.perfect_zone_end:
+            # Perfect timing - ideal tea
+            self.game_state = "success"
+            self.wins += 1
+            difficulty_msg = f" (Win #{self.wins})" if self.wins > 1 else ""
+            self.result_message = f"Perfect! Ideal Tea{difficulty_msg}"
+            self.result_timer = 2.0
+        else:
+            # Too late but not completely - strong tea
+            self.game_state = "bitter"
+            self.result_message = "Too Late! Bitter Tea"
+            self.result_timer = 2.0
+            self.wins = 0  # Reset win streak on failure
+    
+    def get_timer_progress(self):
+        """Get current timer progress (0.0 to 1.0)"""
+        return min(self.timer_elapsed / self.timer_total, 1.0)
+    
+    def is_in_perfect_zone(self):
+        """Check if current progress is in perfect zone"""
+        progress = self.get_timer_progress()
+        return self.perfect_zone_start <= progress <= self.perfect_zone_end
+    
+    def get_difficulty_info(self):
+        """Get current difficulty information"""
+        zone_size = (self.perfect_zone_end - self.perfect_zone_start) * 100
+        return f"Speed: {self.timer_total:.1f}s | Zone: {zone_size:.0f}% | Wins: {self.wins}"
 
 class PingPongGame:
     def __init__(self, width=120, height=200, ball_speed=2, paddle_speed=3):
@@ -497,6 +632,7 @@ class CafeApp:
         self.inside  = AnimatedGif(INSIDE_GIF)
         self.focused_scene = AnimatedGif(FOCUSED_GIF)
         self.fireplace = AnimatedGif(FIREPLACE_GIF)
+        self.coffee = AnimatedGif(COFFEE_GIF)
         # Fallback: if specified INSIDE_GIF path didn't load but a generic 'inside.gif' exists, use it
         alt_inside_path = os.path.join(ASSETS_DIR, 'inside.gif')
         if not self.inside.valid and os.path.isfile(alt_inside_path):
@@ -530,9 +666,11 @@ class CafeApp:
         # Pygame mixer for bell
         self.rain_channel = None
         self.fireplace_channel = None
+        self.coffee_channel = None
         self.bell_loaded = False
         self.rain_loaded = False
         self.fireplace_loaded = False
+        self.coffee_loaded = False
         self.fireplace_playing = False
         self.music_channel = None
         self.music_loaded = False
@@ -564,6 +702,15 @@ class CafeApp:
                     self.fireplace_loaded = True
                 except Exception as fe:
                     print("[WARN] Could not load fireplace sound:", fe)
+            
+            # Load coffee brewing sound but don't play it yet
+            if os.path.isfile(COFFEE_SOUND):
+                try:
+                    self.coffee_sound = pygame.mixer.Sound(COFFEE_SOUND)
+                    self.coffee_sound.set_volume(1.0)  # Maximum volume for coffee brewing
+                    self.coffee_loaded = True
+                except Exception as ce:
+                    print("[WARN] Could not load coffee sound:", ce)
         except Exception as e:
             print("[WARN] Pygame mixer init failed:", e)
 
@@ -602,7 +749,7 @@ class CafeApp:
         # Phone game state
         self.phone_game_active = False
         self.phone_image = None
-        self.ping_pong_game = None
+        self.tea_timer_game = None
         
         # Key state tracking for smooth phone game controls
         self.keys_pressed = set()
@@ -610,6 +757,14 @@ class CafeApp:
         # Meditation state
         self.meditation_active = False
         self.meditation_timer = None
+        
+        # Coffee scene state
+        self.coffee_scene_active = False
+        self.coffee_brewing = False
+        self.coffee_brew_timer = 0
+        self.coffee_channel = None
+        self.coffee_reading_visible = True  # Show reading initially, hide after click
+        self.current_coffee_reading = ""  # Store the current coffee reading
         
         # To-do list state
         self.todo_list_active = False
@@ -714,6 +869,8 @@ class CafeApp:
                         self.start_meditation()
                     elif label == "Fireplace":
                         self.toggle_fireplace()
+                    elif label == "Coffee":
+                        self.start_coffee_scene()
                     return
                     
         # If creative submenu active, handle submenu clicks
@@ -814,6 +971,13 @@ class CafeApp:
             if self._point_in_box(lx, ly, CALENDAR_HITBOX):
                 self.open_calendar_window()
                 return
+                
+        # Coffee scene interactive clicks
+        if self.scene.state == SceneManager.STATE_COFFEE:
+            # Click anywhere to hide the coffee reading
+            self.coffee_reading_visible = False
+            return
+            
         # Cozy music change button click
         if self.cozy_music_button and self.scene.state == SceneManager.STATE_INSIDE:
             # Music button works regardless of mood selection
@@ -839,6 +1003,12 @@ class CafeApp:
             except Exception as e:
                 print("[WARN] Bell play failed:", e)
 
+    def play_ring(self):
+        try:
+            pygame.mixer.Sound(RING_SOUND).play()
+        except Exception as e:
+            print("[WARN] Ring play failed:", e)
+
     def loop(self):
         now = time.time()
         dt = now - self.last_time
@@ -848,16 +1018,9 @@ class CafeApp:
         self.update_animation_time(dt)
         
         # Update phone game if active
-        if self.phone_game_active and self.ping_pong_game:
-            # Handle continuous key input for smooth paddle movement (backup system)
-            keys_to_check = list(self.keys_pressed)  # Convert to list to avoid set changes during iteration
-            for key in keys_to_check:
-                if key.lower() in ('w', 'up'):
-                    self.ping_pong_game.move_player_up()
-                elif key.lower() in ('s', 'down'):
-                    self.ping_pong_game.move_player_down()
-            
-            self.ping_pong_game.update()
+        if self.phone_game_active and self.tea_timer_game:
+            # Update tea timer game
+            self.tea_timer_game.update(dt)
             
         # Update meditation timer if active
         if self.meditation_active and self.meditation_timer:
@@ -865,6 +1028,25 @@ class CafeApp:
             if not self.meditation_timer.is_active:
                 # Timer finished
                 self.meditation_active = False
+                
+        # Update coffee brewing timer if brewing
+        if self.coffee_brewing:
+            self.coffee_brew_timer += dt
+            print(f"[DEBUG] Coffee brewing: {self.coffee_brew_timer:.1f}/5.0 seconds")
+            # Coffee finishes brewing after 5 seconds
+            if self.coffee_brew_timer >= 5.0:
+                print("[DEBUG] Coffee brewing finished!")
+                self.coffee_brewing = False
+                # Stop coffee sound
+                if self.coffee_channel:
+                    self.coffee_channel.stop()
+                    self.coffee_channel = None
+                # Play ring and transition to coffee scene
+                self.play_ring()
+                self.coffee_scene_active = True
+                self.coffee_reading_visible = True  # Reset reading visibility for new session
+                self.current_coffee_reading = self.get_random_coffee_reading()  # Generate new reading
+                self.scene.trigger_fade_to_coffee()
                 
         self.draw()
 
@@ -890,14 +1072,17 @@ class CafeApp:
         frame_in = None
         frame_focus = None
         frame_fireplace = None
+        frame_coffee = None
         if self.scene.state in (SceneManager.STATE_OUTSIDE, SceneManager.STATE_FADING):
             frame_out = self.outside.get_frame(self.elapsed_outside_ms) if self.outside.valid else self.placeholder_frame("OUTSIDE")
-        if self.scene.state in (SceneManager.STATE_INSIDE, SceneManager.STATE_FADING, SceneManager.STATE_FADING_TO_FOCUSED, SceneManager.STATE_FADING_TO_FIREPLACE, SceneManager.STATE_FADING_FROM_FIREPLACE):
+        if self.scene.state in (SceneManager.STATE_INSIDE, SceneManager.STATE_FADING, SceneManager.STATE_FADING_TO_FOCUSED, SceneManager.STATE_FADING_TO_FIREPLACE, SceneManager.STATE_FADING_FROM_FIREPLACE, SceneManager.STATE_FADING_TO_COFFEE, SceneManager.STATE_FADING_FROM_COFFEE):
             frame_in = self.inside.get_frame(self.elapsed_inside_ms) if self.inside.valid else None
         if self.scene.state in (SceneManager.STATE_FOCUSED, SceneManager.STATE_FADING_TO_FOCUSED):
             frame_focus = self.focused_scene.get_frame(self.elapsed_focused_ms) if self.focused_scene.valid else None
         if self.scene.state in (SceneManager.STATE_FIREPLACE, SceneManager.STATE_FADING_TO_FIREPLACE, SceneManager.STATE_FADING_FROM_FIREPLACE):
             frame_fireplace = self.fireplace.get_frame(self.elapsed_inside_ms) if self.fireplace.valid else None
+        if self.scene.state in (SceneManager.STATE_COFFEE, SceneManager.STATE_FADING_TO_COFFEE, SceneManager.STATE_FADING_FROM_COFFEE):
+            frame_coffee = self.coffee.get_frame(self.elapsed_inside_ms) if self.coffee.valid else self.placeholder_frame("COFFEE", COFFEE_BG_COLOR)
 
         if frame_out is not None:
             frame_out = self._standardize_frame(frame_out)
@@ -907,6 +1092,8 @@ class CafeApp:
             frame_focus = self._standardize_frame(frame_focus)
         if frame_fireplace is not None:
             frame_fireplace = self._standardize_frame(frame_fireplace)
+        if frame_coffee is not None:
+            frame_coffee = self._standardize_frame(frame_coffee)
 
         # Blend logic across transitions
         if self.scene.state == SceneManager.STATE_FADING and frame_out and frame_in:
@@ -940,6 +1127,24 @@ class CafeApp:
             alpha = self.scene.fade_counter / max(1, CROSSFADE_FRAMES)
             blended = Image.blend(frame_fireplace, frame_in, alpha)
             disp = self._to_photo(blended)
+        elif self.scene.state == SceneManager.STATE_FADING_TO_COFFEE:
+            # Fade from inside to coffee scene
+            if frame_coffee is None:
+                frame_coffee = self.placeholder_frame('COFFEE', COFFEE_BG_COLOR)
+            if frame_in is None:
+                frame_in = self.placeholder_frame('INSIDE')
+            alpha = self.scene.fade_counter / max(1, CROSSFADE_FRAMES)
+            blended = Image.blend(frame_in, frame_coffee, alpha)
+            disp = self._to_photo(blended)
+        elif self.scene.state == SceneManager.STATE_FADING_FROM_COFFEE:
+            # Fade from coffee scene back to inside
+            if frame_coffee is None:
+                frame_coffee = self.placeholder_frame('COFFEE', COFFEE_BG_COLOR)
+            if frame_in is None:
+                frame_in = self.placeholder_frame('INSIDE')
+            alpha = self.scene.fade_counter / max(1, CROSSFADE_FRAMES)
+            blended = Image.blend(frame_coffee, frame_in, alpha)
+            disp = self._to_photo(blended)
         elif self.scene.state == SceneManager.STATE_TEARING:
             # Render tearing effect (with placeholder if needed)
             if frame_in is None:
@@ -951,7 +1156,9 @@ class CafeApp:
             disp = self._to_photo(tear_img)
         else:
             # choose highest priority frame by current state
-            if self.scene.state == SceneManager.STATE_FIREPLACE and frame_fireplace is not None:
+            if self.scene.state == SceneManager.STATE_COFFEE and frame_coffee is not None:
+                base = frame_coffee
+            elif self.scene.state == SceneManager.STATE_FIREPLACE and frame_fireplace is not None:
                 base = frame_fireplace
             elif self.scene.state == SceneManager.STATE_FOCUSED and frame_focus is not None:
                 base = frame_focus
@@ -962,6 +1169,10 @@ class CafeApp:
             disp = self._to_photo(base)
         self.canvas.create_image(0, 0, anchor="nw", image=disp)
         self._frame_refs.append(disp)
+
+        # Draw coffee scene overlay when in coffee mode
+        if self.scene.state == SceneManager.STATE_COFFEE:
+            self.draw_coffee_scene()
 
         # (Optional) debug hotspot (disabled by default)
         if SHOW_DOOR_DEBUG and self.scene.state == SceneManager.STATE_OUTSIDE:
@@ -983,6 +1194,25 @@ class CafeApp:
         # Activate menu first time we are inside
         if ENABLE_MOOD_MENU and self.scene.state == SceneManager.STATE_INSIDE and not self.menu_active and self.menu_selected_index == -1:
             self.activate_mood_menu()
+
+        # Show coffee brewing message when brewing
+        if self.coffee_brewing:
+            # Animated dots (cycle through 1, 2, 3 dots)
+            dot_cycle = int(self.coffee_brew_timer * 2) % 3 + 1
+            dots = "." * dot_cycle
+            brewing_text = f"Making coffee{dots}"
+            
+            if USE_BLOCKY_FONT:
+                text_width = self._get_blocky_text_width(brewing_text)
+                text_x = (self.width - text_width) // 2
+                text_y = self.height // 2 - 10
+                self._draw_blocky_text(text_x, text_y, brewing_text, "#d7ccc8")
+            else:
+                px = self.scale
+                self.canvas.create_text((self.width//2)*px, (self.height//2)*px,
+                                      text=brewing_text, 
+                                      fill="#d7ccc8", 
+                                      font=("Courier New", 72, "bold"))
 
         if self.menu_active:
             # advance animation progress
@@ -1395,8 +1625,8 @@ class CafeApp:
         self.root.destroy()
 
     def on_key(self, event):
-        # ESC during focus transition, focused state, fireplace transition, or fireplace - return to inside view and show menu
-        if self.scene.state in (SceneManager.STATE_FADING_TO_FOCUSED, SceneManager.STATE_FOCUSED, SceneManager.STATE_TEARING, SceneManager.STATE_FADING_TO_FIREPLACE, SceneManager.STATE_FIREPLACE, SceneManager.STATE_FADING_FROM_FIREPLACE):
+        # ESC during focus transition, focused state, fireplace transition, fireplace, coffee transition, or coffee - return to inside view and show menu
+        if self.scene.state in (SceneManager.STATE_FADING_TO_FOCUSED, SceneManager.STATE_FOCUSED, SceneManager.STATE_TEARING, SceneManager.STATE_FADING_TO_FIREPLACE, SceneManager.STATE_FIREPLACE, SceneManager.STATE_FADING_FROM_FIREPLACE, SceneManager.STATE_FADING_TO_COFFEE, SceneManager.STATE_COFFEE, SceneManager.STATE_FADING_FROM_COFFEE):
             if event.keysym == 'Escape':
                 # Handle fireplace exit with transition
                 if self.scene.state in (SceneManager.STATE_FADING_TO_FIREPLACE, SceneManager.STATE_FIREPLACE):
@@ -1407,11 +1637,25 @@ class CafeApp:
                         self.fireplace_playing = False
                     # Use smooth transition back to inside scene
                     self.scene.trigger_fade_from_fireplace()
+                # Handle coffee scene exit with transition
+                elif self.scene.state in (SceneManager.STATE_FADING_TO_COFFEE, SceneManager.STATE_COFFEE):
+                    self.coffee_scene_active = False
+                    # Use smooth transition back to inside scene
+                    self.scene.trigger_fade_from_coffee()
                 else:
                     # For other states, immediate transition to inside
                     self.scene.state = SceneManager.STATE_INSIDE
-                # Reactivate the menu when returning from focus mode or fireplace
+                # Reactivate the menu when returning from focus mode, fireplace, or coffee
                 self.activate_mood_menu()
+                return
+        
+        # Coffee brewing controls - allow ESC to cancel brewing
+        if self.coffee_brewing:
+            if event.keysym == 'Escape':
+                self.coffee_brewing = False
+                if self.coffee_channel:
+                    self.coffee_channel.stop()
+                    self.coffee_channel = None
                 return
         
         # Meditation controls
@@ -1422,22 +1666,16 @@ class CafeApp:
                 self.cozy_submenu_active = True  # Return to cozy submenu
                 return
                 
-        # Phone game controls - simple direct key handling that works
-        if self.phone_game_active and self.ping_pong_game:
+        # Phone game controls - Tea Timer Challenge
+        if self.phone_game_active and self.tea_timer_game:
             if event.keysym == 'Escape':
                 self.phone_game_active = False
-                self.ping_pong_game = None
+                self.tea_timer_game = None
                 self.cozy_submenu_active = True  # Return to cozy submenu
                 return
-            elif event.keysym in ('w', 'W', 'Up'):
-                # Move up multiple times for smoother movement
-                for _ in range(2):
-                    self.ping_pong_game.move_player_up()
-                return
-            elif event.keysym in ('s', 'S', 'Down'):
-                # Move down multiple times for smoother movement  
-                for _ in range(2):
-                    self.ping_pong_game.move_player_down()
+            elif event.keysym == 'Return':
+                # Only Enter key triggers tea timing attempt
+                self.tea_timer_game.handle_key_press()
                 return
                 
         # To-do list controls
@@ -1528,6 +1766,8 @@ class CafeApp:
                         self.start_meditation()
                     elif label == "Fireplace":
                         self.toggle_fireplace()
+                    elif label == "Coffee":
+                        self.start_coffee_scene()
                     elif label == "iPod":
                         self.start_ipod()
             elif event.keysym == 'Escape':
@@ -2520,22 +2760,22 @@ class CafeApp:
         # Use configurable game dimensions with scale factor
         game_w = int(PHONE_GAME_WIDTH * PHONE_GAME_SCALE)
         game_h = int(PHONE_GAME_HEIGHT * PHONE_GAME_SCALE)
-        self.ping_pong_game = PingPongGame(game_w, game_h, PONG_BALL_SPEED, PONG_PADDLE_SPEED)
+        self.tea_timer_game = TeaTimerGame(game_w, game_h)
         
         # Ensure window has focus for key events
         self.root.focus_force()
         self.canvas.focus_set()  # Also set focus on canvas
         
     def draw_phone_game(self):
-        if not self.phone_image or not self.ping_pong_game:
+        if not self.phone_image or not self.tea_timer_game:
             return
             
         px = self.scale
         
-        # Center phone on screen
+        # Center phone on screen horizontally, move up by 1cm vertically
         phone_w, phone_h = self.phone_image.size
         phone_x = (self.width - phone_w) // 2
-        phone_y = (self.height - phone_h) // 2
+        phone_y = (self.height - phone_h) // 2 - 60  # Move up more (~2cm)
         
         # Draw phone image
         phone_photo = self._to_photo(self.phone_image)
@@ -2547,63 +2787,106 @@ class CafeApp:
         game_offset_y = phone_y + int(PHONE_GAME_OFFSET_Y * PHONE_GAME_SCALE)
         
         # Draw game area background
-        game_w, game_h = self.ping_pong_game.width, self.ping_pong_game.height
+        game_w, game_h = self.tea_timer_game.width, self.tea_timer_game.height
         self.canvas.create_rectangle(game_offset_x*px, game_offset_y*px, 
                                      (game_offset_x + game_w)*px, (game_offset_y + game_h)*px,
-                                     fill="#000000", outline="#ffffff", width=1)
+                                     fill="#2a1810", outline="#8b4513", width=2)
         
-        # Draw center line
-        center_x = game_offset_x + game_w // 2
-        line_spacing = max(8, int(10 * PHONE_GAME_SCALE))
-        for y in range(game_offset_y, game_offset_y + game_h, line_spacing):
-            line_height = max(3, int(5 * PHONE_GAME_SCALE))
-            self.canvas.create_rectangle(center_x*px, y*px, (center_x+1)*px, (y+line_height)*px, 
-                                         fill="#ffffff", outline="")
+        # Draw title
+        title_y = game_offset_y + 15
+        self.canvas.create_text((game_offset_x + game_w//2)*px, title_y*px,
+                              text="TEA TIMER", fill="#f4e4c1", 
+                              font=("Fixedsys", 9, "bold"))
         
-        # Draw paddles
-        # Player paddle (left)
-        paddle_x = game_offset_x
-        paddle_y = game_offset_y + self.ping_pong_game.player_y
-        self.canvas.create_rectangle(paddle_x*px, paddle_y*px, 
-                                     (paddle_x + self.ping_pong_game.paddle_width)*px,
-                                     (paddle_y + self.ping_pong_game.paddle_height)*px,
-                                     fill="#ffffff", outline="")
+        # Draw timer bar background
+        bar_margin = 15
+        bar_height = 25
+        bar_y = title_y + 30
+        bar_x_start = game_offset_x + bar_margin
+        bar_x_end = game_offset_x + game_w - bar_margin
+        bar_width = bar_x_end - bar_x_start
         
-        # AI paddle (right)
-        ai_paddle_x = game_offset_x + game_w - self.ping_pong_game.paddle_width
-        ai_paddle_y = game_offset_y + self.ping_pong_game.ai_y
-        self.canvas.create_rectangle(ai_paddle_x*px, ai_paddle_y*px,
-                                     (ai_paddle_x + self.ping_pong_game.paddle_width)*px,
-                                     (ai_paddle_y + self.ping_pong_game.paddle_height)*px,
-                                     fill="#ffffff", outline="")
+        # Timer bar background
+        self.canvas.create_rectangle(bar_x_start*px, bar_y*px,
+                                   bar_x_end*px, (bar_y + bar_height)*px,
+                                   fill="#654321", outline="#8b4513", width=2)
         
-        # Draw ball
-        ball_x = game_offset_x + self.ping_pong_game.ball_x
-        ball_y = game_offset_y + self.ping_pong_game.ball_y
-        ball_size = self.ping_pong_game.ball_size
-        self.canvas.create_rectangle(ball_x*px, ball_y*px, 
-                                     (ball_x + ball_size)*px, (ball_y + ball_size)*px,
-                                     fill="#ffffff", outline="")
+        # Perfect zone indicator
+        perfect_start_x = bar_x_start + int(bar_width * self.tea_timer_game.perfect_zone_start)
+        perfect_end_x = bar_x_start + int(bar_width * self.tea_timer_game.perfect_zone_end)
+        self.canvas.create_rectangle(perfect_start_x*px, bar_y*px,
+                                   perfect_end_x*px, (bar_y + bar_height)*px,
+                                   fill="#90EE90", outline="#228B22", width=1)
         
-        # Draw score
-        score_text = f"{self.ping_pong_game.player_score} - {self.ping_pong_game.ai_score}"
-        score_x = game_offset_x + game_w // 2
-        score_y = game_offset_y - int(20 * PHONE_GAME_SCALE)
-        if USE_BLOCKY_FONT:
-            score_width = self._get_blocky_text_width(score_text)
-            self._draw_blocky_text(score_x - score_width//2, score_y, score_text, "#ffffff")
-        else:
-            font_size = max(8, int(12 * PHONE_GAME_SCALE))
-            self.canvas.create_text(score_x*px, score_y*px, text=score_text, 
-                                    fill="#ffffff", font=("Courier New", font_size, "bold"))
+        # Current timer progress
+        progress = self.tea_timer_game.get_timer_progress()
+        current_x = bar_x_start + int(bar_width * progress)
+        if progress > 0:
+            # Timer progress bar
+            color = "#90EE90" if self.tea_timer_game.is_in_perfect_zone() else "#DEB887"
+            self.canvas.create_rectangle(bar_x_start*px, bar_y*px,
+                                       current_x*px, (bar_y + bar_height)*px,
+                                       fill=color, outline="")
         
-        # Draw controls hint
-        controls_text = "W/S or ↑/↓ to move • ESC to exit"
-        controls_x = game_offset_x + game_w // 2
-        controls_y = game_offset_y + game_h + int(15 * PHONE_GAME_SCALE)
-        hint_font_size = max(6, int(8 * PHONE_GAME_SCALE))
-        self.canvas.create_text(controls_x*px, controls_y*px, text=controls_text,
-                                fill="#ffffff", font=("Courier New", hint_font_size), anchor="n")
+        # Timer position indicator (moving line)
+        if self.tea_timer_game.game_state == "running":
+            self.canvas.create_line(current_x*px, bar_y*px,
+                                  current_x*px, (bar_y + bar_height)*px,
+                                  fill="red", width=3)
+        
+        # Instructions
+        inst_y = bar_y + bar_height + 25
+        if self.tea_timer_game.game_state == "running":
+            self.canvas.create_text((game_offset_x + game_w//2)*px, inst_y*px,
+                                  text="Press ENTER in", fill="#f4e4c1", 
+                                  font=("Fixedsys", 7))
+            self.canvas.create_text((game_offset_x + game_w//2)*px, (inst_y + 12)*px,
+                                  text="GREEN ZONE", fill="#90EE90", 
+                                  font=("Fixedsys", 7, "bold"))
+        
+        # Difficulty info
+        diff_y = inst_y + 30
+        difficulty_info = self.tea_timer_game.get_difficulty_info()
+        # Split difficulty info into multiple lines if too long
+        parts = difficulty_info.split(" | ")
+        for i, part in enumerate(parts):
+            self.canvas.create_text((game_offset_x + game_w//2)*px, (diff_y + i*10)*px,
+                                  text=part, fill="#DEB887", 
+                                  font=("Fixedsys", 6))
+        
+        # Result message
+        if self.tea_timer_game.result_message:
+            result_y = diff_y + len(parts)*10 + 15
+            color = "#90EE90" if "Perfect" in self.tea_timer_game.result_message else "#FF6B6B"
+            # Split long result messages
+            message = self.tea_timer_game.result_message
+            if len(message) > 15:
+                words = message.split()
+                line1 = " ".join(words[:2])
+                line2 = " ".join(words[2:])
+                self.canvas.create_text((game_offset_x + game_w//2)*px, result_y*px,
+                                      text=line1, fill=color, 
+                                      font=("Fixedsys", 8, "bold"))
+                self.canvas.create_text((game_offset_x + game_w//2)*px, (result_y + 12)*px,
+                                      text=line2, fill=color, 
+                                      font=("Fixedsys", 8, "bold"))
+            else:
+                self.canvas.create_text((game_offset_x + game_w//2)*px, result_y*px,
+                                      text=message, fill=color, 
+                                      font=("Fixedsys", 8, "bold"))
+        
+        # Timer display
+        time_left = max(0, self.tea_timer_game.timer_total - self.tea_timer_game.timer_elapsed)
+        timer_y = game_offset_y + game_h - 30
+        self.canvas.create_text((game_offset_x + game_w//2)*px, timer_y*px,
+                              text=f"{time_left:.1f}s", fill="#f4e4c1", 
+                              font=("Fixedsys", 7))
+        
+        # Exit instruction
+        exit_y = game_offset_y + game_h - 15
+        self.canvas.create_text((game_offset_x + game_w//2)*px, exit_y*px,
+                              text="ESC=exit", fill="#888", 
+                              font=("Fixedsys", 6))
     
     # -------- Meditation Methods --------
     def start_meditation(self):
@@ -2712,6 +2995,251 @@ class CafeApp:
         self.canvas.create_text((panel_x + panel_w//2)*px, exit_y*px,
                                 text=exit_text, fill=MEDITATION_TEXT_COLOR,
                                 font=("Courier New", 10), anchor="n")
+
+    # -------- Coffee Scene Methods --------
+    def start_coffee_scene(self):
+        """Start the coffee brewing process."""
+        self.coffee_brewing = True
+        self.coffee_brew_timer = 0
+        # Play coffee brewing sound
+        if self.coffee_loaded:
+            try:
+                self.coffee_channel = self.coffee_sound.play(loops=0)  # Play once, no looping
+            except Exception as e:
+                print("[WARN] Could not play coffee sound:", e)
+        
+    def get_random_coffee_reading(self):
+        """Generate a random reading from a curated set of short, fun quotes (not coffee-specific)."""
+        quotes = [
+            "Plot twist: it worked on the first try",
+            "Low effort, high impact",
+            "Shipping beats perfect",
+            "Vibes immaculate, bugs negotiable",
+            "Pixels over polish",
+            "No meetings, just momentum",
+            "Stay curious, stay scrappy",
+            "Move fast, don't break your soul",
+            "Silent grind, loud results",
+            "Make it simple, make it weird",
+            "Less talk, more ship",
+            "Chaos, but curated",
+            "Comfort zone: read-only",
+            "Unmute your ideas",
+            "Stay dangerous, be kind",
+            "New tab, new chance",
+            "Risk it for the biscuit",
+            "Launch, then learn",
+            "Perfect is postponed",
+            "Iterate like you mean it",
+            "Small wins, big waves",
+            "Energy is a skill",
+            "Do it scared",
+            "We outside the comfort zone",
+            "Delayed not denied",
+            "Trust the plot",
+            "You are the update",
+            "Delete the doubt",
+            "Tap in, lock in",
+            "Let it be legendary",
+            "Quietly iconic",
+            "Build weird, stay soft",
+            "Main character moment",
+            "Dream in 8-bit",
+            "Own the timeline",
+            "Keep it playful",
+            "Stay low, glow high",
+            "Calm is a superpower",
+            "Make it make sense",
+            "Touch grass, write code",
+            "Unsubscribe from drama",
+            "Choose different",
+            "Time is loud today",
+            "You got this, obviously",
+            "Certified vibe engineer",
+            "Do less, but better",
+            "Unbothered, hydrated",
+            "Soft reset, hard focus",
+            "New day, who dis",
+            "Gold star energy",
+            "Chaos, but optimized",
+            "Blink and it's done",
+            "High signal, low noise",
+            "Stack wins, not tabs",
+            "Speedrun the boring parts",
+            "Make room for magic",
+            "Edge case enthusiast",
+            "Loading: better days",
+            "Unstoppable but chill",
+            "Go where the energy is",
+            "Clean commits, clean mind",
+            "Main quest: joy",
+            "Side quests allowed",
+            "Take up pixel space",
+            "Beauty in the scuffed",
+            "Grace over grind",
+            "Good weird only",
+            "Pause, then pounce",
+            "Curiosity has Wi-Fi",
+            "Make it inevitable",
+            "Out of office, in the zone",
+            "Focus is a flex",
+            "Keyboard therapy session",
+            "Don't overthink the fun",
+            "Protect your peace",
+            "Your pace is the meta",
+            "Stay crispy, not burnt",
+            "Mind like water",
+            "Try, fail, learn, repeat",
+            "Be the plot twist",
+            "Start where you stand",
+            "Done is gorgeous",
+            "Leave room for wonder",
+            "Future you says thanks",
+            "Bet on your odd ideas",
+            "Quiet hustle, loud life",
+            "Nothing to prove",
+            "Wild but respectful",
+            "Let the nice things find you",
+            "Naps are strategy",
+            "Tap into cozy mode",
+            "Soft launch your brilliance",
+            "Refactor the vibe",
+            "Shenanigans permitted",
+            "Kindness scales",
+            "Deadlines and lifelines",
+            "Breathe like you mean it",
+            "Light mode energy, dark mode focus",
+            "New level unlocked",
+            "Make it delightfully unnecessary",
+            "Go make a tiny masterpiece",
+            "Minimum viable joy",
+            "Permission to be luminous",
+            "Protect the weekend",
+            "Aligned and unbothered",
+            "Luck loves momentum",
+            "Keep the bar weird",
+            "Stay risky, stay kind",
+            "Debug the mood",
+            "Lag is temporary, style is forever",
+            "Readme of your life: concise",
+            "Trust your taste",
+            "Underpromise, overvibe",
+            "No one is you",
+            "Signal > noise",
+            "Make sparks, not smoke",
+            "Commit messages write history",
+            "Charge the fun meter",
+            "Delight is a feature",
+            "Whimsy approved",
+            "Be the friendly anomaly",
+            "Play like nobody's watching",
+            "Infinite scroll of good ideas",
+            "Bring your weird to work",
+            "Curious, not furious",
+            "Less doom, more bloom",
+            "Quiet power, loud kindness",
+            "Soft edges, sharp mind",
+            "Ship the thing",
+            "Chaos is a ladder... to learning",
+            "Prototype the feeling",
+            "Win the morning, coast the night",
+            "Own your narrative",
+            "Kind over cool",
+            "Progress: now playing",
+            "Give them easter eggs",
+            "Write it like you mean it",
+            "Bugs fear committed people",
+            "You are allowed to take up space",
+            "Make the small thing special",
+            "Rest like it's part of the plan",
+            "Momentum is magnetic",
+            "Tiny steps, thunder results",
+            "Refresh the vibe cache",
+            "Be the calm in the chaos",
+            "Chase clarity, not clout",
+            "Smoother than your timeline",
+            "Dream big, cache often",
+            "Your weird is your superpower",
+            "Quiet focus, bright future",
+            "Upgrade your inner voice",
+            "Run your own benchmark",
+            "Don't borrow future stress",
+            "We ship joy here",
+            "Stay stubborn about your goals",
+            "Make boredom productive",
+            "Reduce, reuse, reimagine",
+            "Collect moments, not tabs",
+            "Less scroll, more soul",
+            "Respect your rest",
+            "Today: soft start, sharp finish",
+            "Find the fun in the friction",
+            "Keep learning out loud",
+            "You're building a classic",
+            "Every day is dev day",
+            "Let curiosity lead",
+            "Good ideas love quiet",
+            "Make it feel inevitable",
+            "Clarity over clever",
+            "Practice makes patterns",
+            "Confidence in draft mode",
+            "Kindness is a force multiplier",
+            "Your taste is a compass",
+            "Stay human in the loop",
+            "Protect your creative bandwidth",
+        ]
+        
+        import random
+        return random.choice(quotes)
+
+    def draw_coffee_scene(self):
+        """Draw coffee scene with coffee reading fortune"""
+        px = self.scale
+        
+        # Only show coffee reading if it's still visible
+        if self.coffee_reading_visible:
+            # Use the stored coffee reading for this session
+            today_reading = self.current_coffee_reading
+            
+            # Reading text (wrapped for better display) - moved higher up
+            reading_y = self.height//2 - 80
+            words = today_reading.split()
+            lines = []
+            current_line = []
+            for word in words:
+                current_line.append(word)
+                if len(' '.join(current_line)) > 45:  # Wrap at ~45 characters
+                    lines.append(' '.join(current_line[:-1]))
+                    current_line = [word]
+            if current_line:
+                lines.append(' '.join(current_line))
+            
+            for i, line in enumerate(lines):
+                line_y = reading_y + (i * 25)
+                self.canvas.create_text((self.width//2)*px, line_y*px,
+                                      text=line, 
+                                      fill="white", 
+                                      font=("Fixedsys", 12, "normal"))
+            
+            # Decorative elements
+            cup_y = reading_y + len(lines) * 25 + 30
+            self.canvas.create_text((self.width//2)*px, cup_y*px,
+                                  text="~ Today's Brew Brings Wisdom ~", 
+                                  fill="white", 
+                                  font=("Fixedsys", 10, "normal"))
+            
+            # Click instruction
+            click_y = cup_y + 25
+            self.canvas.create_text((self.width//2)*px, click_y*px,
+                                  text="(Click anywhere to hide reading)", 
+                                  fill="white", 
+                                  font=("Fixedsys", 8, "normal"))
+        
+        # Instructions (always shown)
+        instruction_y = self.height - 60
+        self.canvas.create_text((self.width//2)*px, instruction_y*px,
+                              text="Press ESC to return to the café", 
+                              fill="white", 
+                              font=("Fixedsys", 10, "normal"))
 
     # -------- To-Do List Methods --------
     def start_todo_list(self):
